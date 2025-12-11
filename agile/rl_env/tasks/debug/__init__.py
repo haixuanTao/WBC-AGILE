@@ -37,3 +37,15 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:DummyPpoRunnerCfg",
     },
 )
+
+
+# Object interaction debug environments
+gym.register(
+    id="Debug-G1-Object-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.object_debug_env_cfg:G1ObjectDebugEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:DummyPpoRunnerCfg",
+    },
+)

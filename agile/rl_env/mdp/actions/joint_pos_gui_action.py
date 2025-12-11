@@ -104,11 +104,11 @@ class JointPositionGUIAction(JointPositionAction):
         """Create the DearPyGui window and sliders for each joint."""
         import dearpygui.dearpygui as dpg
 
-        # Create context and viewport
+        # Create context and viewport (sized to fit both joint and object pose windows)
         dpg.create_context()
-        dpg.create_viewport(title="Joint Position Controller", width=600, height=1000)
+        dpg.create_viewport(title="Debug Controller", width=600, height=1200)
 
-        with dpg.window(label="Joint Position Controller", tag="primary_window"):
+        with dpg.window(label="Joint Position Controller", tag="joint_window", width=580, height=700, pos=(10, 10)):
             dpg.add_text("Adjust joint positions (radians)")
             dpg.add_separator()
 
@@ -271,9 +271,6 @@ class JointPositionGUIAction(JointPositionAction):
                                 effort_bar_tags.append(bar_tag)
 
                 dpg.add_separator()
-
-        # Set the window as primary so it auto-resizes with the viewport
-        dpg.set_primary_window("primary_window", True)
 
         # Finalize and start event loop (blocking in this thread only)
         dpg.setup_dearpygui()

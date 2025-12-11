@@ -16,3 +16,5 @@ agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt filte
 docs/figures/separate_upper_lower_body_policy_diagram.png filter=lfs diff=lfs merge=lfs -text
 docs/figures/agile_highlights.png filter=lfs diff=lfs merge=lfs -text
 agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student_checkpoint.pt filter=lfs diff=lfs merge=lfs -text
+docs/videos/debug_gui_g1.gif filter=lfs diff=lfs merge=lfs -text
+docs/videos/debug_robot_object_interaction.gif filter=lfs diff=lfs merge=lfs -text

@@ -15,4 +15,6 @@
 
 from .aestetic_rewards import *  # noqa: F401, F403
 from .regularization_rewards import *  # noqa: F401, F403
+from .reward_visualizer import *  # noqa: F401, F403
+from .reward_visualizer_cfg import *  # noqa: F401, F403
 from .task_rewards import *  # noqa: F401, F403

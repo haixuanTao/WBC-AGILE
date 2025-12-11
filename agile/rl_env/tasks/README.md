@@ -139,19 +139,45 @@ Tasks for learning to recover from arbitrary fallen poses and stand up. Uses ful
 
 ### 4. Debug (`debug/`)
 
-Special environment for debugging MDP terms (rewards, observations), symmetry functions, and robot models. This environment launches two floating robots with a GUI for direct joint control, allowing users to change target positions and PD gains of all joints interactively.
+Special environments for debugging MDP terms (rewards, observations), symmetry functions, and robot models. These environments provide interactive GUI controls for direct joint and object manipulation.
 
-The two robots are present to verify symmetry functions: actions are mirrored through the symmetry functions between the two robots. The GUI is implemented as an action, so rewards and observations run normally during debugging.
+#### Joint Debug Environment
+
+Launches two floating robots with a GUI for direct joint control, allowing users to change target positions and PD gains of all joints interactively. The two robots verify symmetry functions: actions are mirrored through the symmetry functions between them.
+
+![Joint Debug GUI](../../../docs/videos/debug_gui_g1.gif)
 
 | Task ID | Description |
 |---------|-------------|
-| `Debug-G1-v0` | Debug environment for Unitree G1 |
-| `Debug-T1-v0` | Debug environment for Booster T1 |
+| `Debug-G1-v0` | Joint debug environment for Unitree G1 |
+| `Debug-T1-v0` | Joint debug environment for Booster T1 |
 
-To run the debug env, run
+#### Object Interaction Debug Environment
+
+Extends the joint debug environment with interactive object pose control. Useful for debugging robot-object interaction policies by manually positioning both the robot joints and the object.
+
+![Object Interaction Debug](../../../docs/videos/debug_robot_object_interaction.gif)
+
+| Task ID | Description |
+|---------|-------------|
+| `Debug-G1-Object-v0` | Object interaction debug environment for Unitree G1 |
+
+**Features:**
+- Joint position GUI control for the robot
+- Object pose GUI control (position + rotation)
+- Reward visualizer to monitor reward terms in real-time
+- Configurable position/rotation limits for the object
+
+To run the debug environments:
 ```bash
+# Joint debug
 python scripts/play.py --task Debug-G1-v0
+
+# Object interaction debug
+python scripts/play.py --task Debug-G1-Object-v0
 ```
+
+**Tip:** To adapt an existing task for GUI debugging, see the usage example in `debug/object_debug_env_cfg.py`.
 
 ## Adding New Tasks
 
