@@ -121,7 +121,7 @@ class TestAllTasks(unittest.TestCase):
                 policy_dir, "velocity_height_g1", "unitree_g1_velocity_height_teacher.pt"
             ),
             "Velocity-Height-G1-Distillation-Recurrent-v0": os.path.join(
-                policy_dir, "velocity_height_g1", "unitree_g1_velocity_height_recurrent_student.pt"
+                policy_dir, "velocity_height_g1", "unitree_g1_velocity_height_recurrent_student_checkpoint.pt"
             ),
         }
 
