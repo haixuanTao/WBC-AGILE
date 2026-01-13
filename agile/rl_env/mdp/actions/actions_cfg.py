@@ -95,8 +95,8 @@ class JointPositionGUIActionCfg(mdp.JointActionCfg):
     If True, this flag results in overwriting the values of :attr:`offset` to the default joint positions
     from the articulation asset.
     """
-    max_stiffness: float = 200.0
-    """Maximum stiffness for the P-gain slider. Defaults to 200.0."""
+    max_stiffness: float = 500.0
+    """Maximum stiffness for the P-gain slider. Defaults to 500.0."""
     max_damping: float = 25.0
     """Maximum damping for the D-gain slider. Defaults to 25.0."""
 

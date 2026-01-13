@@ -83,6 +83,29 @@ class JointPositionGUIAction(JointPositionAction):
         self._mirror_actions = cfg.mirror_actions
         self._robot_type = cfg.robot_type
 
+        # Pre-allocate buffers for apply_actions (avoid per-step allocations)
+        self._full_stiffness_buffer = torch.zeros(self.num_envs, num_all_joints, device=self.device)
+        self._full_damping_buffer = torch.zeros(self.num_envs, num_all_joints, device=self.device)
+
+        # Pre-compute joint_ids as a tensor for efficient indexing
+        if isinstance(self._joint_ids, slice):
+            self._joint_ids_tensor = torch.arange(
+                self._joint_ids.start or 0,
+                self._joint_ids.stop,
+                self._joint_ids.step or 1,
+                device=self.device,
+            )
+        else:
+            self._joint_ids_tensor = torch.tensor(self._joint_ids, device=self.device, dtype=torch.long)
+
+        # Pre-compute actuator joint IDs as tensors
+        self._actuator_joint_ids: dict[str, torch.Tensor] = {}
+        for name, actuator in self._asset.actuators.items():
+            actuator_joint_ids = self._asset.find_joints(actuator.joint_names)[0]
+            self._actuator_joint_ids[name] = torch.tensor(
+                actuator_joint_ids, device=self.device, dtype=torch.long
+            )
+
         if self._robot_type == "g1":
             self._symmetry_augmentation_func = lr_mirror_G1
         elif self._robot_type == "t1":
@@ -331,39 +354,22 @@ class JointPositionGUIAction(JointPositionAction):
 
         self._asset.set_joint_position_target(full_pos, joint_ids=self._joint_ids)
 
-        # Apply PD gains
-        if isinstance(self._joint_ids, slice):
-            # Create a tensor representing the range of the slice
-            joint_ids_tensor = torch.arange(
-                self._joint_ids.start or 0,
-                self._joint_ids.stop,
-                self._joint_ids.step or 1,
-                device=self.device,
-            )
-        else:
-            joint_ids_tensor = torch.tensor(self._joint_ids, device=self.device)
-
-        # Create a full tensor for all stiffness and damping values
-        full_stiffness = torch.cat(
-            [actuator.stiffness.clone() for actuator in self._asset.actuators.values()],
-            dim=1,
-        )
-        full_damping = torch.cat(
-            [actuator.damping.clone() for actuator in self._asset.actuators.values()],
-            dim=1,
-        )
+        # Apply PD gains using pre-allocated buffers
+        # Populate from actuators in correct joint positions
+        for name, actuator in self._asset.actuators.items():
+            joint_ids = self._actuator_joint_ids[name]
+            self._full_stiffness_buffer[:, joint_ids] = actuator.stiffness
+            self._full_damping_buffer[:, joint_ids] = actuator.damping
 
         # Update the values for the selected joints
-        full_stiffness[:, joint_ids_tensor] = target_stiffness
-        full_damping[:, joint_ids_tensor] = target_damping
+        self._full_stiffness_buffer[:, self._joint_ids_tensor] = target_stiffness
+        self._full_damping_buffer[:, self._joint_ids_tensor] = target_damping
 
         # Distribute the updated values back to the actuators
-        offset = 0
-        for actuator in self._asset.actuators.values():
-            num_dof = actuator.stiffness.shape[1]
-            actuator.stiffness[:] = full_stiffness.narrow(1, offset, num_dof)
-            actuator.damping[:] = full_damping.narrow(1, offset, num_dof)
-            offset += num_dof
+        for name, actuator in self._asset.actuators.items():
+            joint_ids = self._actuator_joint_ids[name]
+            actuator.stiffness[:] = self._full_stiffness_buffer.index_select(1, joint_ids)
+            actuator.damping[:] = self._full_damping_buffer.index_select(1, joint_ids)
 
     # ---------------------------------------------------------------------
     # Misc helpers
