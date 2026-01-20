@@ -106,6 +106,7 @@ agile/                       # Repository root
   - [Docker Build Process](#docker-build-process)
   - [Pre-commit Hooks](#pre-commit-hooks)
 - [Deployment](#deployment)
+- [Office Hour and FAQ](#office-hour-and-faq)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
@@ -431,6 +432,15 @@ Note: The `third_party` directory is excluded from all pre-commit hooks to prese
 Policy deployment for sim-to-real transfer currently utilizes NVIDIA's internal deployment framework, which is planned for public release in the near future.
 
 **Pre-trained Policies:** We include several verified pre-trained checkpoints in the repository for evaluation and deployment. See [`agile/data/policy/README.md`](agile/data/policy/README.md) for available policies and usage instructions.
+
+## Office Hour and FAQ
+
+We hosted a robotics livestream office hour session providing an in-depth walkthrough of the AGILE framework. During the session, we addressed community questions covering topics such as training workflows, sim-to-real transfer, and extending the framework for custom robots and tasks.
+
+**Resources:**
+- 📺 **[YouTube Recording](https://www.youtube.com/live/ANvkdrESIuc?si=KPd8PvXFipt8FsG9)**
+- 📄 **[FAQ Document](OFFICE_HOUR_FAQ.md)**
+
 
 ## Troubleshooting
 
