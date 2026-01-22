@@ -171,7 +171,7 @@ Extends the joint debug environment with interactive object pose control. Useful
 To run the debug environments:
 ```bash
 # Joint debug
-python scripts/play.py --task Debug-G1-v0
+python scripts/play.py --task Debug-G1-v0 --num_envs 2
 
 # Object interaction debug
 python scripts/play.py --task Debug-G1-Object-v0
