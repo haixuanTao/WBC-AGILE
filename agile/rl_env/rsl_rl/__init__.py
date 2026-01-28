@@ -28,6 +28,7 @@ The following example shows how to wrap an environment for RSL-RL:
 
 from .exporter import export_policy_as_jit, export_policy_as_onnx
 from .l2c2_cfg import RslRlL2C2Cfg
+from .reward_normalization_cfg import RslRlRewardNormalizationCfg
 from .rl_cfg import (
     RslRlOnPolicyRunnerCfg,
     RslRlPpoActorCriticCfg,
@@ -47,6 +48,7 @@ __all__ = [
     "RslRlOnPolicyRunnerCfg",
     "RslRlPpoActorCriticCfg",
     "RslRlPpoAlgorithmCfg",
+    "RslRlRewardNormalizationCfg",
     "RslRlRndCfg",
     "RslRlSymmetryCfg",
     "RslRlL2C2Cfg",
