@@ -62,6 +62,7 @@ class Distillation:
             self.gpu_world_size = 1
 
         self.rnd = None  # TODO: remove when runner has a proper base class
+        self.reward_normalizer = None  # TODO: remove when runner has a proper base class
 
         # Symmetry components
         if symmetry_cfg is not None:
