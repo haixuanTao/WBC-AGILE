@@ -48,6 +48,10 @@ def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     return a - b + c
 
 
+# Alias for compatibility with isaaclab naming convention
+quat_apply_inverse = quat_rotate_inverse
+
+
 def quat_inv(q: torch.Tensor) -> torch.Tensor:
     """
     Compute the inverse (conjugate) of a quaternion.

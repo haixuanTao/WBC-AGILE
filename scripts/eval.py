@@ -134,7 +134,6 @@ import torch
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 import agile.rl_env.tasks  # noqa: F401
@@ -315,6 +314,11 @@ def main():
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.use_pretrained_checkpoint:
+        try:
+            from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+        except ImportError:
+            print("[ERROR] Pretrained checkpoint feature not available in this Isaac Lab version.")
+            return
         resume_path = get_published_pretrained_checkpoint("rsl_rl", args_cli.task)
         if not resume_path:
             print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
@@ -462,12 +466,11 @@ def main():
     while simulation_app.is_running() and num_steps < args_cli.num_steps:
         start_time = time.time()
 
-        # Check if we need to update scheduled commands based on time
-        if scheduler:
-            scheduler.update(dt)
-
         # run everything in inference mode
         with torch.inference_mode():
+            # Check if we need to update scheduled commands based on time
+            if scheduler:
+                scheduler.update(dt)
             # Convert TensorDict to tensor if needed (for exported TorchScript policies)
             if is_tensordict_obs and ppo_runner is None:
                 # Flatten TensorDict to tensor for exported policy

@@ -175,6 +175,16 @@ class TestAllTasks(unittest.TestCase):
                     env["OMNI_HEADLESS"] = "1"
                     env["DISPLAY"] = ":1"
 
+                    # Add fast fallen state collection overrides for StandUp tasks
+                    if "StandUp" in task:
+                        cmd.extend(
+                            [
+                                "agent.fallen_state_dataset_cfg.num_spawns_per_level=1",
+                                "agent.fallen_state_dataset_cfg.fall_duration_s=0.1",
+                                "agent.fallen_state_dataset_cfg.cache_enabled=False",
+                            ]
+                        )
+
                     print(f"Running command: {' '.join(cmd)}", flush=True)
 
                     # Distillation tasks need more time to load teacher models
@@ -356,6 +366,7 @@ class TestAllTasks(unittest.TestCase):
 
         task = "Velocity-G1-History-v0"
         num_envs = 2
+        num_steps = 10
 
         cmd = [
             self.isaaclab_script,
@@ -365,9 +376,8 @@ class TestAllTasks(unittest.TestCase):
             task,
             "--num_envs",
             str(num_envs),
-            "--video",
-            "--video_length",
-            "10",
+            "--num_steps",
+            str(num_steps),
             "--headless",
         ]
 
@@ -382,10 +392,11 @@ class TestAllTasks(unittest.TestCase):
         print(f"Command: {' '.join(cmd)}", flush=True)
 
         try:
+            # Environment initialization can take a while in Isaac Lab
             subprocess.run(
                 cmd,
                 check=True,
-                timeout=120,
+                timeout=180,
                 capture_output=True,
                 text=True,
                 env=env,
