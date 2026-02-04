@@ -27,6 +27,7 @@ from typing import Literal
 from isaaclab.utils import configclass
 
 from .l2c2_cfg import RslRlL2C2Cfg
+from .reward_normalization_cfg import RslRlRewardNormalizationCfg
 from .rnd_cfg import RslRlRndCfg
 from .symmetry_cfg import RslRlSymmetryCfg
 
@@ -143,6 +144,9 @@ class RslRlPpoAlgorithmCfg:
 
     l2c2_cfg: RslRlL2C2Cfg | None = None
     """The configuration for L2C2 regularization. Default is None, in which case L2C2 is not used."""
+
+    reward_normalization_cfg: RslRlRewardNormalizationCfg | None = None
+    """Configuration for reward normalization. Default is None (disabled)."""
 
 
 #########################

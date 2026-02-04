@@ -26,6 +26,7 @@ import torch.optim as optim
 from itertools import chain
 
 from rsl_rl.modules import ActorCritic
+from rsl_rl.modules.normalizer import ReturnVarianceNormalization
 from rsl_rl.modules.rnd import RandomNetworkDistillation
 from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import string_to_callable
@@ -63,6 +64,8 @@ class PPO:
         multi_gpu_cfg: dict | None = None,
         # L2C2 parameters
         l2c2_cfg: dict | None = None,
+        # Reward normalization parameters
+        reward_normalization_cfg: dict | None = None,
     ):
         # device-related parameters
         self.device = device
@@ -117,6 +120,16 @@ class PPO:
         else:
             self.use_l2c2 = False
 
+        # Reward normalization
+        if reward_normalization_cfg is not None:
+            self.reward_normalizer = ReturnVarianceNormalization(
+                shape=[1],
+                eps=reward_normalization_cfg["epsilon"],
+                gamma=gamma,
+                decay=reward_normalization_cfg["decay"],
+            ).to(device)
+        else:
+            self.reward_normalizer = None
 
         # PPO components
         self.policy = policy
@@ -190,7 +203,11 @@ class PPO:
     def process_env_step(self, rewards, dones, infos):
         # Record the rewards and dones
         # Note: we clone here because later on we bootstrap the rewards based on timeouts
-        self.transition.rewards = rewards.clone()
+        # Normalize rewards (before RND intrinsic rewards are added)
+        if self.reward_normalizer is not None:
+            self.transition.rewards = self.reward_normalizer(rewards.clone())
+        else:
+            self.transition.rewards = rewards.clone()
         self.transition.dones = dones
 
         # Compute the intrinsic rewards and add to extrinsic rewards

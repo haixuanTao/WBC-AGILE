@@ -395,7 +395,7 @@ See [tests/README.md](tests/README.md) for detailed testing guide.
 ### Docker Build Process
 
 The `workflows/Dockerfile`:
-1. Starts from `nvcr.io/nvidia/isaac-lab:2.3.0` base image
+1. Starts from `nvcr.io/nvidia/isaac-lab:2.3.1` base image
 2. Installs Python dependencies into Isaac Lab's environment
 3. Removes conflicting rsl_rl packages
 4. Installs custom rsl_rl with TensorDict support

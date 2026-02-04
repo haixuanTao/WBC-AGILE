@@ -518,6 +518,9 @@ class OnPolicyRunner:
         if self.alg.rnd:
             saved_dict["rnd_state_dict"] = self.alg.rnd.state_dict()
             saved_dict["rnd_optimizer_state_dict"] = self.alg.rnd_optimizer.state_dict()
+        # -- Save reward normalizer if used
+        if self.alg.reward_normalizer is not None:
+            saved_dict["reward_norm_state_dict"] = self.alg.reward_normalizer.state_dict()
         # -- Save observation normalizer if used
         if self.empirical_normalization:
             saved_dict["obs_norm_state_dict"] = self.obs_normalizer.state_dict()
@@ -537,6 +540,9 @@ class OnPolicyRunner:
         # -- Load RND model if used
         if self.alg.rnd:
             self.alg.rnd.load_state_dict(loaded_dict["rnd_state_dict"])
+        # -- Load reward normalizer if used
+        if self.alg.reward_normalizer is not None and "reward_norm_state_dict" in loaded_dict:
+            self.alg.reward_normalizer.load_state_dict(loaded_dict["reward_norm_state_dict"])
         # -- Load observation normalizer if used
         if self.empirical_normalization:
             if resumed_training:
@@ -578,6 +584,9 @@ class OnPolicyRunner:
         # -- RND
         if self.alg.rnd:
             self.alg.rnd.train()
+        # -- Reward normalizer
+        if self.alg.reward_normalizer is not None:
+            self.alg.reward_normalizer.train()
         # -- Normalization
         if self.empirical_normalization:
             self.obs_normalizer.train()
@@ -589,6 +598,9 @@ class OnPolicyRunner:
         # -- RND
         if self.alg.rnd:
             self.alg.rnd.eval()
+        # -- Reward normalizer
+        if self.alg.reward_normalizer is not None:
+            self.alg.reward_normalizer.eval()
         # -- Normalization
         if self.empirical_normalization:
             self.obs_normalizer.eval()

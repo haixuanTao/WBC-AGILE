@@ -134,7 +134,6 @@ import torch
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 import agile.rl_env.tasks  # noqa: F401
@@ -315,6 +314,12 @@ def main():
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.use_pretrained_checkpoint:
+        try:
+            from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+        except ImportError:
+            print("[ERROR] Pretrained checkpoint feature not available in this Isaac Lab version.")
+            return
+
         resume_path = get_published_pretrained_checkpoint("rsl_rl", args_cli.task)
         if not resume_path:
             print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
@@ -328,6 +333,9 @@ def main():
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    # Call pre_learn hook if the task provides one (e.g., to load fallen state dataset)
+    _call_pre_learn_hook(env.unwrapped, args_cli.task, agent_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
@@ -462,12 +470,11 @@ def main():
     while simulation_app.is_running() and num_steps < args_cli.num_steps:
         start_time = time.time()
 
-        # Check if we need to update scheduled commands based on time
-        if scheduler:
-            scheduler.update(dt)
-
         # run everything in inference mode
         with torch.inference_mode():
+            # Check if we need to update scheduled commands based on time
+            if scheduler:
+                scheduler.update(dt)
             # Convert TensorDict to tensor if needed (for exported TorchScript policies)
             if is_tensordict_obs and ppo_runner is None:
                 # Flatten TensorDict to tensor for exported policy
@@ -584,6 +591,25 @@ def main():
 
     # close the simulator
     env.close()
+
+
+def _call_pre_learn_hook(env, task_name: str, agent_cfg) -> None:
+    """Call pre_learn hook if the task provides one.
+
+    This is needed for tasks that require setup before the first reset
+    (e.g., loading fallen state datasets for stand-up tasks).
+    """
+    import importlib
+
+    pre_learn_entry_point = gym.spec(task_name).kwargs.get("pre_learn_entry_point")
+    if pre_learn_entry_point is None:
+        return  # No pre_learn hook for this task
+
+    # Call pre_learn
+    mod_name, fn_name = pre_learn_entry_point.split(":")
+    mod = importlib.import_module(mod_name)
+    pre_learn_fn = getattr(mod, fn_name)
+    pre_learn_fn(env, task_name, agent_cfg)
 
 
 if __name__ == "__main__":

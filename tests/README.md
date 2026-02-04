@@ -170,5 +170,5 @@ num_envs = 32        # More parallel environments
 
 ### CI Tests Failing
 1. Check if `datasets` dependency is in `install_deps_ci.sh`
-2. Verify Docker image is correct: `nvcr.io/nvidia/isaac-lab:2.3.0`
+2. Verify Docker image is correct: `nvcr.io/nvidia/isaac-lab:2.3.1`
 3. Check GitLab runner has GPU access for E2E tests

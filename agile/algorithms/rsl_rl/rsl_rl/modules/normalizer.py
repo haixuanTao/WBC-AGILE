@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -127,3 +129,54 @@ class DiscountedAverage:
         else:
             self.avg = self.avg * self.gamma + rew
         return self.avg
+
+
+class ReturnVarianceNormalization(nn.Module):
+    """Normalize rewards to achieve unit variance returns using EMA statistics.
+
+    For returns G = sum(gamma^t * r_t), if rewards have variance sigma^2:
+        Var(G) ~ sigma^2 / (1 - gamma^2)
+
+    Dividing rewards by sigma / sqrt(1 - gamma^2) gives Var(G) ~ 1.
+
+    Uses exponential moving average (EMA) for variance tracking, allowing
+    adaptation to curriculum changes during training.
+
+    Args:
+        shape: Shape of the reward tensor (excluding batch dimension).
+        eps: Small value for numerical stability.
+        gamma: Discount factor from PPO.
+        decay: EMA decay factor. Higher = slower adaptation.
+            decay=0.999 -> ~693 steps half-life
+            decay=0.9999 -> ~6931 steps half-life
+    """
+
+    def __init__(self, shape, eps=1e-2, gamma=0.99, decay=0.999):
+        super().__init__()
+        self.eps = eps
+        self.gamma = gamma
+        self.decay = decay
+        self.gamma_factor = 1.0 / math.sqrt(1 - gamma**2)
+
+        # EMA statistics for variance
+        self.register_buffer("_var", torch.ones(shape).unsqueeze(0))
+        self.register_buffer("_std", torch.ones(shape).unsqueeze(0))
+        self.register_buffer("_mean", torch.zeros(shape).unsqueeze(0))
+
+    def forward(self, rew):
+        if self.training:
+            self.update(rew)
+        # Normalize: rew / (sigma / sqrt(1 - gamma^2)) = rew * sqrt(1 - gamma^2) / sigma
+        return rew / (self._std * self.gamma_factor + self.eps)
+
+    @torch.jit.unused
+    def update(self, rew):
+        # Compute batch statistics
+        var_x = torch.var(rew, dim=0, unbiased=False, keepdim=True)
+        mean_x = torch.mean(rew, dim=0, keepdim=True)
+
+        # EMA update: stat = decay * stat + (1 - decay) * new_stat
+        alpha = 1.0 - self.decay
+        self._mean = self.decay * self._mean + alpha * mean_x
+        self._var = self.decay * self._var + alpha * var_x
+        self._std = torch.sqrt(self._var)
