@@ -121,12 +121,12 @@ agile/                       # Repository root
 
 ### Prerequisites
 
-**Install Isaac Lab 2.3.0**:
-Follow the installation [guide](https://isaac-sim.github.io/IsaacLab/v2.3.0/source/setup/installation/index.html). Note that Isaac Sim 5.1 is required to use the verified USD provided in this project.
+**Install Isaac Lab 2.3.1**:
+Follow the installation [guide](https://isaac-sim.github.io/IsaacLab/v2.3.1/source/setup/installation/index.html). Note that Isaac Sim 5.1 is required to use the verified USD provided in this project.
 We recommend using the conda installation. Remember to check out the specific branch as follows.
    ```bash
-   # Ensure you're using version 2.3.0
-   git checkout v2.3.0
+   # Ensure you're using version 2.3.1
+   git checkout v2.3.1
    ```
 </details>
 
@@ -395,7 +395,7 @@ See [tests/README.md](tests/README.md) for detailed testing guide.
 ### Docker Build Process
 
 The `workflows/Dockerfile`:
-1. Starts from `nvcr.io/nvidia/isaac-lab:2.3.0` base image
+1. Starts from `nvcr.io/nvidia/isaac-lab:2.3.1` base image
 2. Installs Python dependencies into Isaac Lab's environment
 3. Removes conflicting rsl_rl packages
 4. Installs custom rsl_rl with TensorDict support
