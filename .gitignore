@@ -17,4 +17,7 @@ agile/data/policy/eval/**
 
 fallen_states_cache/
 
+docs/_build/
+docs/venv_docs/
+
 CLAUDE.md

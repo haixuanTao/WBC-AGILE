@@ -1,0 +1,18 @@
+/* Force clean background for gallery table cells */
+table.gallery td {
+    background-color: inherit !important;
+    border: none !important;
+}
+
+table.gallery img {
+    background-color: inherit !important;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+table.gallery,
+table.gallery td,
+table.gallery th {
+    border: none !important;
+    box-shadow: none !important;
+}
