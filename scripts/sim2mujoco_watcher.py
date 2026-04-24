@@ -528,12 +528,22 @@ def main():
     if not args.no_wandb and args.wandb_run_id:
         import wandb
 
+        # Shared mode lets this watcher log into the training run concurrently
+        # with the training process. Without it, W&B silently treats the
+        # training as the primary writer and the watcher's sim_to_sim/*
+        # history ends up at low `_step` values that the default UI panels
+        # don't surface — the data lands on the server but is invisible.
         wb_run = wandb.init(
             entity=args.wandb_entity,
             project=args.wandb_project,
             id=args.wandb_run_id,
             resume="allow",
             job_type="sim_to_sim_eval",
+            settings=wandb.Settings(
+                mode="shared",
+                x_label="sim2sim_watcher",
+                x_primary=False,
+            ),
         )
         wb_run.define_metric("sim_to_sim/iter")
         wb_run.define_metric("sim_to_sim/*", step_metric="sim_to_sim/iter")
