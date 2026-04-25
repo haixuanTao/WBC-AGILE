@@ -68,7 +68,6 @@ from agile.sim2mujoco.policy import PolicyWrapper
 from agile.sim2mujoco.simulation import MuJocoSimulation
 from agile.sim2mujoco.utils import load_config
 
-
 CKPT_RE = re.compile(r"^model_(\d+)\.pt$")
 
 # Upper-bound per-rollout duration. `_run_single_rollout` keeps stepping the
@@ -284,9 +283,7 @@ def _run_single_rollout(
         for step in range(num_steps):
             t = step * control_dt
             _, cmd_vx, cmd_vy, cmd_wz, cmd_h, _ = _scheduled_cmd(t, schedule)
-            command_provider.manager.set_command(
-                linear_x=cmd_vx, linear_y=cmd_vy, angular_z=cmd_wz, height=cmd_h
-            )
+            command_provider.manager.set_command(linear_x=cmd_vx, linear_y=cmd_vy, angular_z=cmd_wz, height=cmd_h)
 
             sim_state = sim.get_state()
             if fell:
@@ -441,12 +438,8 @@ def _load_schedules_yaml(path: Path) -> dict[str, list[tuple[float, float, float
         parsed: list[tuple[float, float, float, float, float, str]] = []
         for e in entries:
             if len(e) != 6:
-                raise ValueError(
-                    f"--schedules: '{name}' entry {e!r} must be [t, vx, vy, wz, height, label]"
-                )
-            parsed.append(
-                (float(e[0]), float(e[1]), float(e[2]), float(e[3]), float(e[4]), str(e[5]))
-            )
+                raise ValueError(f"--schedules: '{name}' entry {e!r} must be [t, vx, vy, wz, height, label]")
+            parsed.append((float(e[0]), float(e[1]), float(e[2]), float(e[3]), float(e[4]), str(e[5])))
         out[str(name)] = parsed
     return out
 
