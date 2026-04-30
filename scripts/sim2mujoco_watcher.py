@@ -239,6 +239,7 @@ def _run_single_rollout(
     init_fn=None,
     hard_eval_originals: dict | None = None,
     hard_eval_rng=None,
+    tracking_body_name: str = "torso_subassembly",
 ) -> RolloutResult:
     """Run one rollout on a given command schedule. Terminates early on fall:
     stops stepping the policy + sim, pads the video with the last frame so
@@ -254,7 +255,7 @@ def _run_single_rollout(
     control_dt = sim.dt
     num_steps = int(SCHEDULE_DURATION_S / control_dt)
 
-    torso_id = mujoco.mj_name2id(sim.mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso_subassembly")
+    torso_id = mujoco.mj_name2id(sim.mj_model, mujoco.mjtObj.mjOBJ_BODY, tracking_body_name)
     cam = mujoco.MjvCamera()
     mujoco.mjv_defaultFreeCamera(sim.mj_model, cam)
     cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
