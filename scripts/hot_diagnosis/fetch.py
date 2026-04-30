@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 DEFAULT_PI = "lerobot@172.18.129.122"
-DEFAULT_REMOTE = "/home/lerobot/devel/lerobot-humanoid-runtime/control/policy/velocity_v16_iter25000"
+DEFAULT_REMOTE = "/home/lerobot/devel/lerobot-humanoid-runtime/control/policy/velocity_v16_iter124750"
 DEFAULT_FILES = (
     "v16_shadow.csv",
     "bipedal_state_log.csv",
