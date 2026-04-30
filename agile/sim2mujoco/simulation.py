@@ -416,9 +416,11 @@ class MuJocoSimulation:
             if self._root_angular_velocity_sensor is not None:
                 root_ang_vel = torch.from_numpy(self._root_angular_velocity_sensor.data.copy()).to(self.device)
             else:
-                # Fallback: Convert world frame angular velocity to root frame.
-                world_ang_vel = torch.from_numpy(self.mj_data.qvel[3:6].copy()).to(self.device)
-                root_ang_vel = self._world_to_root_frame(world_ang_vel, root_quat)
+                # MuJoCo stores free-joint qvel[3:6] in body/local frame, not world.
+                # Confirmed empirically: qvel[3:6] is invariant to pure yaw rotation
+                # of the base. Previous code applied an extra world->body rotation
+                # which double-transformed the value and made obs yaw-sensitive.
+                root_ang_vel = torch.from_numpy(self.mj_data.qvel[3:6].copy()).to(self.device)
 
         if self.fixed_base:
             joint_effort = torch.from_numpy(self.mj_data.qfrc_actuator.copy()).to(self.device)
