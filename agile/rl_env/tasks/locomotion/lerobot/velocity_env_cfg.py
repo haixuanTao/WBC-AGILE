@@ -231,21 +231,25 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["torso_subassembly"])},
     )
 
+    # Torque penalties are bumped ~5-10x vs the original mjlab port to
+    # compensate for the loose sim effort_limits. The goal is for the policy
+    # to learn smoothly to avoid the real-robot torque envelope instead of
+    # rail-riding a hard sim clip.
     torques = RewTerm(
         func=mdp.joint_torques_l2,
-        weight=-1e-4,
+        weight=-5e-4,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=robot.LEG_JOINT_NAMES)},
     )
 
     ankle_torques = RewTerm(
         func=mdp.joint_torques_l2,
-        weight=-1e-4,
+        weight=-1e-3,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*ankle.*")},
     )
 
     ankle_roll_torques = RewTerm(
         func=mdp.joint_torques_l2,
-        weight=-2e-3,
+        weight=-5e-3,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*anklex.*")},
     )
 
@@ -293,7 +297,7 @@ class RewardsCfg:
 
     torque_limits = RewTerm(
         func=mdp.applied_torque_limits,
-        weight=-0.003,
+        weight=-0.01,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
@@ -526,8 +530,8 @@ class LocomotionEventCfg:
                 "y": (-2.5, 2.5),
                 "z": (-0.0, 0.0),
                 "yaw": (-3.14, 3.14),
-                "roll": (-math.radians(10), math.radians(10)),
-                "pitch": (-math.radians(10), math.radians(10)),
+                "roll": (-math.radians(20), math.radians(20)),
+                "pitch": (-math.radians(20), math.radians(20)),
             },
             "velocity_range": {
                 "x": (-0.25, 0.25),
@@ -640,12 +644,15 @@ class LeRobotVelocityEnvCfg(ManagerBasedRLEnvCfg):
 
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
+        # Height scans are only consumed at policy rate; stepping them at the
+        # physics rate does 4x (=decimation) wasted warp+sync work per policy tick.
+        policy_dt = self.sim.dt * self.decimation
         if self.scene.height_measurement_sensor is not None:
-            self.scene.height_measurement_sensor.update_period = self.sim.dt
+            self.scene.height_measurement_sensor.update_period = policy_dt
         if self.scene.height_measurement_sensor_left_foot is not None:
-            self.scene.height_measurement_sensor_left_foot.update_period = self.sim.dt
+            self.scene.height_measurement_sensor_left_foot.update_period = policy_dt
         if self.scene.height_measurement_sensor_right_foot is not None:
-            self.scene.height_measurement_sensor_right_foot.update_period = self.sim.dt
+            self.scene.height_measurement_sensor_right_foot.update_period = policy_dt
 
         self.only_positive_rewards = False
 

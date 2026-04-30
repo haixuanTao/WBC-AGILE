@@ -29,6 +29,7 @@ from agile.isaaclab_extras.utils.io_descriptors import (
     record_shape,
 )
 from agile.rl_env.mdp.commands import UniformVelocityBaseHeightCommand
+from agile.rl_env.mdp.utils import get_base_height_over_terrain
 
 
 @generic_io_descriptor(  # type: ignore[arg-type]
@@ -95,13 +96,10 @@ def velocity_height_command(
 def base_height_from_sensor(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # noqa: ARG001
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Get the base height from the sensor."""
-    robot = env.scene[asset_cfg.name]
-    sensor: RayCaster = env.scene[sensor_cfg.name]
-    base_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
-    return base_height.unsqueeze(1)
+    return get_base_height_over_terrain(env, asset_cfg, sensor_cfg).unsqueeze(1)
 
 
 """

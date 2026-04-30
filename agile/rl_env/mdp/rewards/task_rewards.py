@@ -18,11 +18,10 @@ import torch
 from isaaclab.assets import RigidObject
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.sensors import RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
 from agile.rl_env.mdp.commands import UniformVelocityBaseHeightCommand
-from agile.rl_env.mdp.utils import get_contact_sensor_cfg, get_robot_cfg
+from agile.rl_env.mdp.utils import get_base_height_over_terrain, get_contact_sensor_cfg, get_robot_cfg
 
 
 def nominal_posture_at_end_exp(
@@ -284,16 +283,12 @@ def base_height_exp(
         For flat terrain, target height is in the world frame. For rough terrain,
         sensor readings can adjust the target height to account for the terrain.
     """
-    # extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
     if sensor_cfg is not None:
-        sensor: RayCaster = env.scene[sensor_cfg.name]
-        # Adjust the target height using the sensor data
-        adjusted_target_height = target_height + torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        # (root_z - target - mean(ray_hits_z))^2 == (base_height_over_terrain - target)^2
+        height_error = torch.square(get_base_height_over_terrain(env, asset_cfg, sensor_cfg) - target_height)
     else:
-        # Use the provided target height directly for flat terrain
-        adjusted_target_height = target_height
-    height_error = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+        asset: RigidObject = env.scene[asset_cfg.name]
+        height_error = torch.square(asset.data.root_pos_w[:, 2] - target_height)
     return torch.exp(-height_error / std**2)
 
 

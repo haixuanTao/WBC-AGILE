@@ -100,6 +100,38 @@ def get_contact_sensor_cfg(
     return sensor, sensor_cfg
 
 
+def get_base_height_over_terrain(
+    env: ManagerBasedEnv,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Base height above terrain = ``root_z - mean(raycast_z)``, memoised per
+    policy step.
+
+    This formula is recomputed independently by several termination, reward,
+    and observation callbacks every step; each recomputation walks the ray
+    caster's ``.data`` property, runs ``_update_outdated_buffers``, and does a
+    ``torch.mean`` over the hit points. Sharing the result across callsites
+    within a single policy step keeps the actual work to one compute per
+    ``(asset, sensor)`` pair. The cache is keyed by ``common_step_counter``,
+    so it invalidates automatically on the next policy tick.
+    """
+    step = getattr(env, "common_step_counter", None)
+    cache: dict | None = getattr(env, "_base_height_cache", None)
+    if cache is None or cache.get("__step") != step:
+        cache = {"__step": step}
+        env._base_height_cache = cache  # type: ignore[attr-defined]
+    key = (asset_cfg.name, sensor_cfg.name)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    robot = env.scene[asset_cfg.name]
+    sensor = env.scene[sensor_cfg.name]
+    value = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+    cache[key] = value
+    return value
+
+
 def transform_to_body_frame(positions: torch.Tensor, root_pos: torch.Tensor, root_quat: torch.Tensor) -> torch.Tensor:
     """Transform positions from world frame to body frame.
 
@@ -115,10 +147,9 @@ def transform_to_body_frame(positions: torch.Tensor, root_pos: torch.Tensor, roo
     # Shape: [num_envs, num_points, 3]
     pos_relative = positions - root_pos.unsqueeze(1)
 
-    # Transform positions to body frame
-    pos_body_frame = torch.zeros_like(pos_relative)
-    for i in range(pos_relative.shape[1]):  # For each point
-        pos_body_frame[:, i, :] = math_utils.quat_apply_inverse(root_quat, pos_relative[:, i, :])
+    # Transform positions to body frame (batched over points)
+    quat_expanded = root_quat.unsqueeze(1).expand(-1, pos_relative.shape[1], -1)
+    pos_body_frame = math_utils.quat_apply_inverse(quat_expanded, pos_relative)
 
     return pos_body_frame
 

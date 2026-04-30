@@ -11,6 +11,7 @@ Run from repo root:
         --s2m-config /home/baguette/tmp_eval/config.yaml \\
         --mjcf /home/baguette/tmp_eval/mjcf/robot.xml
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,24 +41,40 @@ def main() -> int:
     ap.add_argument("--local-dir", type=Path, default=Path("hot_data"))
     ap.add_argument("--s2m-config", type=Path, required=True)
     ap.add_argument("--mjcf", type=Path, required=True)
-    ap.add_argument("--go-to-zero", action="store_true",
-                    help="Trigger go_to_zero_and_hold on the Pi between fetch and sim check.")
+    ap.add_argument(
+        "--go-to-zero", action="store_true", help="Trigger go_to_zero_and_hold on the Pi between fetch and sim check."
+    )
     ap.add_argument("--skip-fetch", action="store_true")
     ap.add_argument("--skip-sim", action="store_true")
     ap.add_argument("--skip-replay", action="store_true")
+    ap.add_argument(
+        "--skip-summary", action="store_true", help="Skip the behavioural summary step (alpha1 + summary_metrics)."
+    )
     ap.add_argument("--tol", type=float, default=1e-4)
-    ap.add_argument("--sim-init-from-state-log", action="store_true",
-                    help="Seed sim_rollout from the pulled bipedal_state_log.csv last row.")
+    ap.add_argument(
+        "--tail-seconds", type=float, default=15.0, help="Tail-window length for summary_metrics (0 to disable)."
+    )
+    ap.add_argument(
+        "--sim-init-from-state-log",
+        action="store_true",
+        help="Seed sim_rollout from the pulled bipedal_state_log.csv last row.",
+    )
     args = ap.parse_args()
 
     results: dict[str, int] = {}
 
     if not args.skip_fetch:
         results["fetch"] = _run(
-            [PY, str(HERE / "fetch.py"),
-             "--pi", args.pi,
-             "--remote-dir", args.remote_dir,
-             "--local-dir", str(args.local_dir)],
+            [
+                PY,
+                str(HERE / "fetch.py"),
+                "--pi",
+                args.pi,
+                "--remote-dir",
+                args.remote_dir,
+                "--local-dir",
+                str(args.local_dir),
+            ],
             "fetch",
         )
         if results["fetch"] != 0:
@@ -66,9 +83,7 @@ def main() -> int:
 
     if args.go_to_zero:
         results["go_to_zero"] = _run(
-            [PY, str(HERE / "go_to_zero.py"),
-             "--pi", args.pi,
-             "--remote-dir", args.remote_dir],
+            [PY, str(HERE / "go_to_zero.py"), "--pi", args.pi, "--remote-dir", args.remote_dir],
             "go_to_zero",
         )
         if results["go_to_zero"] != 0:
@@ -79,23 +94,57 @@ def main() -> int:
     shadow_csv = args.local_dir / "v16_shadow.csv"
 
     if not args.skip_sim:
-        sim_cmd = [PY, "-m", "scripts.hot_diagnosis.sim_rollout",
-                   "--policy", str(onnx),
-                   "--s2m-config", str(args.s2m_config),
-                   "--mjcf", str(args.mjcf),
-                   "--out-dir", str(args.local_dir / "sim_rollout")]
+        sim_cmd = [
+            PY,
+            "-m",
+            "scripts.hot_diagnosis.sim_rollout",
+            "--policy",
+            str(onnx),
+            "--s2m-config",
+            str(args.s2m_config),
+            "--mjcf",
+            str(args.mjcf),
+            "--out-dir",
+            str(args.local_dir / "sim_rollout"),
+        ]
         if args.sim_init_from_state_log:
-            sim_cmd += ["--init-from-state-log",
-                        str(args.local_dir / "bipedal_state_log.csv")]
+            sim_cmd += ["--init-from-state-log", str(args.local_dir / "bipedal_state_log.csv")]
         results["sim_rollout"] = _run(sim_cmd, "sim_rollout")
 
     if not args.skip_replay:
         results["onnx_replay"] = _run(
-            [PY, str(HERE / "onnx_replay.py"),
-             "--shadow-csv", str(shadow_csv),
-             "--onnx", str(onnx),
-             "--tol", str(args.tol)],
+            [
+                PY,
+                str(HERE / "onnx_replay.py"),
+                "--shadow-csv",
+                str(shadow_csv),
+                "--onnx",
+                str(onnx),
+                "--tol",
+                str(args.tol),
+            ],
             "onnx_replay",
+        )
+
+    if not args.skip_summary:
+        # Behavioural summary on the log we just fetched: clamp-at-alpha1
+        # stats, then base/gait/tracking metrics. These never "fail" in the
+        # pass/fail sense -- they just print numbers -- so we don't gate on
+        # their rc for the summary verdict.
+        _run(
+            [PY, str(HERE / "alpha1_check.py"), "--rollout-dir", str(args.local_dir)],
+            "alpha1_check",
+        )
+        _run(
+            [
+                PY,
+                str(HERE / "summary_metrics.py"),
+                "--rollout-dir",
+                str(args.local_dir),
+                "--tail-seconds",
+                str(args.tail_seconds),
+            ],
+            "summary_metrics",
         )
 
     print("\n=== SUMMARY")

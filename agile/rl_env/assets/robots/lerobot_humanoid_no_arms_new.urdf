@@ -1922,7 +1922,7 @@
     <parent link="tigh_subassembly"/>
     <child link="shin_subassembly"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-0.523599" upper="0.523599"/>
+    <limit effort="10" velocity="10" lower="-0.7113" upper="0.9889"/>
   </joint>
   <!-- Joint from hipy_subassembly to tigh_subassembly -->
   <joint name="hipy_right" type="revolute">
@@ -1930,7 +1930,7 @@
     <parent link="hipy_subassembly"/>
     <child link="tigh_subassembly"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-1.0472" upper="1.0472"/>
+    <limit effort="10" velocity="10" lower="-1.5376" upper="1.2975"/>
   </joint>
   <!-- Joint from hipx_subassembly to hipy_subassembly -->
   <joint name="hipx_right" type="revolute">
@@ -1938,7 +1938,7 @@
     <parent link="hipx_subassembly"/>
     <child link="hipy_subassembly"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-0.349066" upper="0.349066"/>
+    <limit effort="10" velocity="10" lower="-1.2112" upper="0.5342"/>
   </joint>
   <!-- Joint from torso_subassembly to hipx_subassembly -->
   <joint name="hipz_right" type="revolute">
@@ -1946,7 +1946,7 @@
     <parent link="torso_subassembly"/>
     <child link="hipx_subassembly"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-0.349066" upper="0.349066"/>
+    <limit effort="10" velocity="10" lower="-1.4430" upper="1.3495"/>
   </joint>
   <!-- Link hipx_subassemby_sym -->
   <link name="hipx_subassemby_sym">
@@ -2989,7 +2989,7 @@
     <parent link="tigh_subassembly_sym"/>
     <child link="shin_subassembly_sym"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-0.523599" upper="0.523599"/>
+    <limit effort="10" velocity="10" lower="-0.9568" upper="0.9839"/>
   </joint>
   <!-- Joint from hipy_subassembly_sym to tigh_subassembly_sym -->
   <joint name="hipy_left" type="revolute">
@@ -2997,7 +2997,7 @@
     <parent link="hipy_subassembly_sym"/>
     <child link="tigh_subassembly_sym"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-1.0472" upper="1.0472"/>
+    <limit effort="10" velocity="10" lower="-1.3957" upper="1.5376"/>
   </joint>
   <!-- Joint from hipx_subassemby_sym to hipy_subassembly_sym -->
   <joint name="hipx_left" type="revolute">
@@ -3005,7 +3005,7 @@
     <parent link="hipx_subassemby_sym"/>
     <child link="hipy_subassembly_sym"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-0.349066" upper="0.349066"/>
+    <limit effort="10" velocity="10" lower="-0.5342" upper="1.2112"/>
   </joint>
   <!-- Joint from torso_subassembly to hipx_subassemby_sym -->
   <joint name="hipz_left" type="revolute">
@@ -3013,7 +3013,7 @@
     <parent link="torso_subassembly"/>
     <child link="hipx_subassemby_sym"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-0.349066" upper="0.349066"/>
+    <limit effort="10" velocity="10" lower="-1.3495" upper="1.4430"/>
   </joint>
   <!-- Additional sensors.xml -->
   <sensor>

@@ -10,7 +10,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 from isaaclab.app import AppLauncher
@@ -27,13 +26,13 @@ app = AppLauncher(args).app
 from pathlib import Path
 
 import gymnasium as gym
-import agile.rl_env.tasks  # noqa: F401 — register tasks
-from isaaclab_tasks.utils import load_cfg_from_registry
-from isaaclab.envs import ManagerBasedRLEnvCfg
-
-from agile.rl_env.rsl_rl import RslRlVecEnvWrapper, export_policy_as_onnx
 from rsl_rl.runners import OnPolicyRunner
 
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab_tasks.utils import load_cfg_from_registry
+
+import agile.rl_env.tasks  # noqa: F401 — register tasks
+from agile.rl_env.rsl_rl import RslRlVecEnvWrapper, export_policy_as_onnx
 
 ckpt_path = Path(args.checkpoint).resolve()
 if not ckpt_path.exists():
@@ -75,7 +74,7 @@ export_policy_as_onnx(
 )
 
 size = out_path.stat().st_size
-print(f"[OK] exported ONNX: {out_path} ({size/1024:.1f} KiB)")
+print(f"[OK] exported ONNX: {out_path} ({size / 1024:.1f} KiB)")
 
 env.close()
 app.close()

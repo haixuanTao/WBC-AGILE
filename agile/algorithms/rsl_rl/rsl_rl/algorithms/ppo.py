@@ -528,8 +528,24 @@ class PPO:
 
             # Apply the gradients
             # -- For PPO
-            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-            self.optimizer.step()
+            # Skip updates with any non-finite grads — clip_grad_norm_ does not
+            # sanitize NaN (total_norm becomes NaN and the scale NaN-propagates
+            # into every parameter). Dropping the bad mini-batch leaves the
+            # policy at its last healthy state; the surrogate batch is lost
+            # but we don't corrupt ``self.std`` or anything else.
+            # Accumulate the AND on-GPU and ``.item()`` once at the end — the
+            # previous per-parameter ``.item()`` inside a genexpr forced a
+            # CUDA sync per grad tensor, stacking into 100+ syncs/iter.
+            _grads_finite_mask = torch.ones((), dtype=torch.bool, device=self.device)
+            for p in self.policy.parameters():
+                if p.grad is not None:
+                    _grads_finite_mask &= torch.isfinite(p.grad).all()
+            if _grads_finite_mask.item():
+                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.optimizer.step()
+            else:
+                print("[PPO] non-finite grads — skipping update", flush=True)
+                self.optimizer.zero_grad()
             # -- For RND
             if self.rnd_optimizer:
                 self.rnd_optimizer.step()

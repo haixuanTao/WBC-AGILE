@@ -23,7 +23,7 @@ from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import subtract_frame_transforms
 
-from agile.rl_env.mdp.utils import get_robot_cfg
+from agile.rl_env.mdp.utils import get_base_height_over_terrain, get_robot_cfg
 
 
 def illegal_ground_contact(
@@ -57,10 +57,7 @@ def illegal_base_height(
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_measurement_sensor"),
 ) -> torch.Tensor:
     """Terminate if the base height is below the threshold."""
-    robot, _ = get_robot_cfg(env, asset_cfg)
-    sensor: RayCaster = env.scene[sensor_cfg.name]
-    base_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
-    return base_height < height_threshold
+    return get_base_height_over_terrain(env, asset_cfg, sensor_cfg) < height_threshold
 
 
 class fall_from_max_height(ManagerTermBase):
@@ -105,9 +102,7 @@ class fall_from_max_height(ManagerTermBase):
         Returns:
             Boolean tensor indicating which environments should terminate.
         """
-        robot, _ = get_robot_cfg(env, asset_cfg)
-        sensor: RayCaster = env.scene[sensor_cfg.name]
-        base_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        base_height = get_base_height_over_terrain(env, asset_cfg, sensor_cfg)
 
         # Only track heights above the minimum threshold
         trackable_height = torch.where(

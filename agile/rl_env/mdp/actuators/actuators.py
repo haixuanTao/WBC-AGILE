@@ -26,7 +26,11 @@ from isaaclab.utils import DelayBuffer
 from isaaclab.utils.types import ArticulationActions
 
 if TYPE_CHECKING:
-    from agile.rl_env.mdp.actuators.actuators_cfg import DelayedDCMotorCfg, DelayedImplicitActuatorCfg
+    from agile.rl_env.mdp.actuators.actuators_cfg import (
+        CoupledAnkleDelayedDCMotorCfg,
+        DelayedDCMotorCfg,
+        DelayedImplicitActuatorCfg,
+    )
 
 
 class DelayedDCMotor(DCMotor):
@@ -86,6 +90,60 @@ class DelayedDCMotor(DCMotor):
         control_action.joint_efforts = self.efforts_delay_buffer.compute(control_action.joint_efforts)
         # compte actuator model
         return super().compute(control_action, joint_pos, joint_vel)
+
+
+class CoupledAnkleDelayedDCMotor(DelayedDCMotor):
+    """Delayed DC motor that enforces the diamond torque envelope of coupled
+    ankle motor pairs.
+
+    After the base class computes joint torques, each configured
+    ``(pitch, roll)`` joint pair is mapped back to the two underlying motor
+    torques via the inverse of the position coupling
+    ``q_pitch = -(m_a - m_b)/2``, ``q_roll = (m_a + m_b)/2`` — i.e.
+    ``τ_a = (τ_roll - τ_pitch)/2`` and ``τ_b = (τ_roll + τ_pitch)/2``.
+    Each motor is clamped to ``±motor_tmax`` and then forward-mapped back
+    to joint torques. Joints outside the configured pairs are left untouched.
+    """
+
+    cfg: CoupledAnkleDelayedDCMotorCfg
+
+    def __init__(self, cfg: CoupledAnkleDelayedDCMotorCfg, *args: Any, **kwargs: Any) -> None:
+        super().__init__(cfg, *args, **kwargs)
+
+        pair_idx: list[tuple[int, int]] = []
+        for pitch_name, roll_name in cfg.ankle_pairs:
+            try:
+                pitch_idx = self.joint_names.index(pitch_name)
+                roll_idx = self.joint_names.index(roll_name)
+            except ValueError as exc:
+                raise ValueError(
+                    f"CoupledAnkleDelayedDCMotor: joint(s) not in scope "
+                    f"(pair=({pitch_name}, {roll_name}), scope={self.joint_names})"
+                ) from exc
+            pair_idx.append((pitch_idx, roll_idx))
+        self._ankle_pair_idx = pair_idx
+        self._motor_tmax = float(cfg.motor_tmax)
+
+    def compute(
+        self,
+        control_action: ArticulationActions,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+    ) -> ArticulationActions:
+        result = super().compute(control_action, joint_pos, joint_vel)
+        tau = result.joint_efforts
+        if tau is None or not self._ankle_pair_idx:
+            return result
+        tmax = self._motor_tmax
+        for pitch_idx, roll_idx in self._ankle_pair_idx:
+            tau_p = tau[..., pitch_idx]
+            tau_r = tau[..., roll_idx]
+            m_a = torch.clamp((tau_r - tau_p) * 0.5, -tmax, tmax)
+            m_b = torch.clamp((tau_r + tau_p) * 0.5, -tmax, tmax)
+            tau[..., pitch_idx] = m_b - m_a
+            tau[..., roll_idx] = m_a + m_b
+        result.joint_efforts = tau
+        return result
 
 
 class DelayedImplicitActuator(ImplicitActuator):

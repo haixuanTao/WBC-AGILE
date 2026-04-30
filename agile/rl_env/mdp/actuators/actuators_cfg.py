@@ -19,7 +19,11 @@ from __future__ import annotations
 from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
 from isaaclab.utils import configclass
 
-from agile.rl_env.mdp.actuators.actuators import DelayedDCMotor, DelayedImplicitActuator
+from agile.rl_env.mdp.actuators.actuators import (
+    CoupledAnkleDelayedDCMotor,
+    DelayedDCMotor,
+    DelayedImplicitActuator,
+)
 
 
 @configclass
@@ -46,3 +50,25 @@ class DelayedImplicitActuatorCfg(ImplicitActuatorCfg):
 
     max_delay: int = 0
     """Maximum number of physics time-steps with which the actuator command may be delayed. Defaults to 0."""
+
+
+@configclass
+class CoupledAnkleDelayedDCMotorCfg(DelayedDCMotorCfg):
+    """DelayedDCMotor with a post-compute diamond clamp on coupled ankle pairs.
+
+    For a pair of ankle joints (pitch, roll) driven by two linked motors with
+    position mapping ``q_pitch = -(m_a - m_b)/2``, ``q_roll = (m_a + m_b)/2``,
+    virtual work gives motor torques ``τ_a = (τ_roll - τ_pitch)/2`` and
+    ``τ_b = (τ_roll + τ_pitch)/2``. Clamping each motor to ``motor_tmax``
+    produces the diamond ``|τ_roll ± τ_pitch| ≤ 2·motor_tmax`` at the joints,
+    which is the correct real-hardware envelope.
+    """
+
+    class_type: type = CoupledAnkleDelayedDCMotor
+
+    ankle_pairs: list[tuple[str, str]] = []
+    """List of ``(pitch_joint_name, roll_joint_name)`` for each coupled motor pair.
+    Both names must be resolved inside this actuator's joint scope."""
+
+    motor_tmax: float = 5.5
+    """Per-motor torque limit (Nm) used by the diamond clamp."""

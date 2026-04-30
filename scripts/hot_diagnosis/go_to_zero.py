@@ -5,6 +5,7 @@ so the robot settles toward zero gently instead of snapping. After the ramp
 and hold the Pi script stops motors and exits; we then wait for the user to
 confirm the pose looks correct before continuing the diagnosis.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,14 +21,12 @@ def main() -> int:
     ap.add_argument("--remote-dir", default=DEFAULT_REMOTE)
     ap.add_argument("--ramp-s", type=float, default=4.0)
     ap.add_argument("--hold-s", type=float, default=2.0)
-    ap.add_argument("--no-stop-after", action="store_true",
-                    help="Keep the Pi holding zero indefinitely (Ctrl-C on Pi to stop).")
+    ap.add_argument(
+        "--no-stop-after", action="store_true", help="Keep the Pi holding zero indefinitely (Ctrl-C on Pi to stop)."
+    )
     args = ap.parse_args()
 
-    remote_cmd = (
-        f"cd {args.remote_dir} && "
-        f"python3 go_to_zero_and_hold.py --ramp-s {args.ramp_s} --hold-s {args.hold_s}"
-    )
+    remote_cmd = f"cd {args.remote_dir} && python3 go_to_zero_and_hold.py --ramp-s {args.ramp_s} --hold-s {args.hold_s}"
     if args.no_stop_after:
         remote_cmd += " --no-stop-after"
 
@@ -37,8 +36,7 @@ def main() -> int:
         print(f"[go_to_zero] remote exited rc={rc}")
         return rc
 
-    input("[go_to_zero] Robot should be at zero pose. Verify visually, "
-          "then press Enter to continue. ")
+    input("[go_to_zero] Robot should be at zero pose. Verify visually, then press Enter to continue. ")
     return 0
 
 

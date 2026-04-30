@@ -49,7 +49,6 @@ from agile.sim2mujoco.policy import PolicyWrapper
 from agile.sim2mujoco.simulation import MuJocoSimulation
 from agile.sim2mujoco.utils import load_config
 
-
 CKPT_RE = re.compile(r"^model_(\d+)\.pt$")
 
 # Command schedule: (start_time_s, vx, vy, wz, label). Covers stand, forward,
@@ -177,9 +176,7 @@ def build_once(config_path: Path, mjcf_path: Path, device: torch.device):
     config["mjcf_path"] = str(mjcf_path)
     sim = MuJocoSimulation(config, device, enable_viewer=False, mjcf_path=mjcf_path)
     obs_processor = ObservationProcessor(config, sim.joint_names, device, command_manager=None)
-    command_provider = create_command_provider(
-        config, device, motion_tracker=obs_processor.motion_tracker
-    )
+    command_provider = create_command_provider(config, device, motion_tracker=obs_processor.motion_tracker)
     if isinstance(command_provider, VelocityCommandProvider):
         sim.command_manager = command_provider.manager
         obs_processor.command_manager = command_provider.manager
@@ -237,16 +234,16 @@ def _run_single_rollout(
     fell = False
     survival_time = SCHEDULE_DURATION_S
     is_velocity = isinstance(command_provider, VelocityCommandProvider)
-    zero_actions = torch.zeros(act_processor.total_action_dim, device=policy.device if hasattr(policy, "device") else "cpu")
+    zero_actions = torch.zeros(
+        act_processor.total_action_dim, device=policy.device if hasattr(policy, "device") else "cpu"
+    )
 
     try:
         for step in range(num_steps):
             t = step * control_dt
             _, cmd_vx, cmd_vy, cmd_wz, _ = _scheduled_cmd(t, schedule)
             if is_velocity:
-                command_provider.manager.set_command(
-                    linear_x=cmd_vx, linear_y=cmd_vy, angular_z=cmd_wz
-                )
+                command_provider.manager.set_command(linear_x=cmd_vx, linear_y=cmd_vy, angular_z=cmd_wz)
 
             sim_state = sim.get_state()
             # After the fall, stop querying the policy (its obs is corrupted
@@ -442,8 +439,7 @@ def main():
         )
         dt = time.time() - t0
         per_rollout = "  ".join(
-            f"{r.name}(survived={r.survival_time_s:.1f}s{' FELL' if r.fell else ''})"
-            for r in result.rollouts
+            f"{r.name}(survived={r.survival_time_s:.1f}s{' FELL' if r.fell else ''})" for r in result.rollouts
         )
         print(
             f"[eval] step={result.step}  fall_rate={result.fall_rate:.2f}  "
