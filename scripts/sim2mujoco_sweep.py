@@ -350,21 +350,10 @@ def _wrap_init(
     axis_init: Callable | None,
     rng: np.random.Generator,
     noise_std: float,
-    init_preset: np.ndarray | None = None,
 ) -> Callable:
-    """Combine an optional axis init_fn with per-trial joint-angle noise.
-
-    If ``init_preset`` is given (length = sim.mj_model.nu), the actuated joint
-    angles are overwritten with it BEFORE _init_base_pose runs — this lets
-    _init_base_pose's foot-snap logic place the feet on the floor for the new
-    pose, then any axis-specific init_fn (orientation, height, joint noise)
-    layers on top.
-    """
+    """Combine an optional axis init_fn with per-trial joint-angle noise."""
 
     def _fn(sim):
-        if init_preset is not None:
-            sim.mj_data.qpos[7 : 7 + len(init_preset)] = init_preset
-            mujoco.mj_forward(sim.mj_model, sim.mj_data)
         pelvis_z = (
             axis_init(sim) if axis_init is not None else _init_base_pose(sim, init_quat_wxyz=ROBOT_CFG.init_quat_wxyz)
         )
@@ -410,7 +399,6 @@ def run_sweep(
     fall_height_m: float,
     device_str: str = "cpu",
     output_path: Path | None = None,
-    init_preset: np.ndarray | None = None,
 ) -> dict:
     """Run requested axis sweeps and return (also write) a result dict."""
     from scripts import sim2mujoco_watcher as wmod
@@ -419,8 +407,6 @@ def run_sweep(
     device = torch.device(device_str)
     config, sim, obs_proc, act_proc, cmd_prov = build_once(config_path, mjcf_path, device)
     policy = PolicyWrapper.from_config(checkpoint, config, device)
-    if init_preset is not None and len(init_preset) != sim.mj_model.nu:
-        raise ValueError(f"init_preset has {len(init_preset)} entries, expected {sim.mj_model.nu} (mj_model.nu)")
     originals = _snapshot(sim)
     orig_push = wmod._hard_eval_maybe_push
 
@@ -429,7 +415,6 @@ def run_sweep(
         "n_trials": n_trials,
         "duration_s": duration_s,
         "trial_joint_noise_std": trial_joint_noise_std,
-        "init_preset": init_preset.tolist() if init_preset is not None else None,
         "axes": {},
     }
 
@@ -464,7 +449,7 @@ def run_sweep(
                             if cfg.kind == "init"
                             else None
                         )
-                        init_fn = _wrap_init(axis_init, rng, trial_joint_noise_std, init_preset=init_preset)
+                        init_fn = _wrap_init(axis_init, rng, trial_joint_noise_std)
                         push_active = cfg.kind == "push" and float(value) > 0
                         result = _run_single_rollout(
                             sim=sim,
@@ -564,12 +549,6 @@ def main() -> None:
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--output", type=Path)
     p.add_argument(
-        "--init-preset",
-        type=Path,
-        default=None,
-        help="JSON with {'qpos_actuated': [N floats]} (N = number of actuators) — sets the initial standing pose.",
-    )
-    p.add_argument(
         "--robot-config",
         type=Path,
         default=None,
@@ -612,13 +591,6 @@ def main() -> None:
             p.error("--values is only valid with a single axis.")
         values_override = [float(v) for v in args.values.split(",") if v.strip()]
 
-    init_preset = None
-    if args.init_preset is not None:
-        d = json.loads(args.init_preset.read_text())
-        init_preset = np.asarray(d["qpos_actuated"], dtype=float)
-        if init_preset.ndim != 1:
-            p.error(f"--init-preset qpos_actuated must be a 1-D list, got shape {init_preset.shape}")
-
     run_sweep(
         checkpoint=args.checkpoint,
         config_path=args.config,
@@ -631,7 +603,6 @@ def main() -> None:
         fall_height_m=args.fall_height,
         device_str=args.device,
         output_path=args.output,
-        init_preset=init_preset,
     )
 
 
