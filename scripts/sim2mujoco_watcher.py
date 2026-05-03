@@ -109,6 +109,47 @@ SCHEDULES: dict[str, list[tuple[float, float, float, float, float, str]]] = {
 }
 
 
+# Hard-eval difficulty: per-rollout domain randomization + scheduled random
+# horizontal pushes. Sized to be inside the policy's training distribution but
+# stiff enough to separate checkpoints that all hit the ceiling on the bare
+# bones eval. Off by default — gated on --hard-eval.
+HARD_EVAL_MASS_RANGE = (0.85, 1.15)
+HARD_EVAL_FRICTION_RANGE = (0.7, 1.3)
+HARD_EVAL_DAMPING_RANGE = (0.7, 1.3)
+HARD_EVAL_PUSH_TIMES_S = (3.0, 6.0, 9.0)
+HARD_EVAL_PUSH_MAG_RANGE = (0.5, 1.0)
+
+
+def _hard_eval_capture(sim) -> dict[str, np.ndarray]:
+    """Snapshot mj_model arrays the hard-eval hooks randomize. Captured once
+    against the freshly built sim and reused so DR is always relative to the
+    pristine model rather than the previous rollout's randomized values."""
+    return {
+        "body_mass": sim.mj_model.body_mass.copy(),
+        "geom_friction": sim.mj_model.geom_friction.copy(),
+        "dof_damping": sim.mj_model.dof_damping.copy(),
+    }
+
+
+def _hard_eval_apply_dr(sim, originals: dict[str, np.ndarray], rng: np.random.Generator) -> None:
+    """Restore originals then resample uniform scales — DR per-rollout."""
+    sim.mj_model.body_mass[:] = originals["body_mass"] * rng.uniform(*HARD_EVAL_MASS_RANGE)
+    sim.mj_model.geom_friction[:] = originals["geom_friction"] * rng.uniform(*HARD_EVAL_FRICTION_RANGE)
+    sim.mj_model.dof_damping[:] = originals["dof_damping"] * rng.uniform(*HARD_EVAL_DAMPING_RANGE)
+    mujoco.mj_forward(sim.mj_model, sim.mj_data)
+
+
+def _hard_eval_maybe_push(sim, rng: np.random.Generator, t_now: float, t_prev: float) -> None:
+    """If a scheduled push time was crossed this step, kick the base velocity
+    in a random horizontal direction. The policy has to react online."""
+    for pt in HARD_EVAL_PUSH_TIMES_S:
+        if t_prev <= pt < t_now:
+            mag = rng.uniform(*HARD_EVAL_PUSH_MAG_RANGE)
+            angle = rng.uniform(0, 2 * np.pi)
+            sim.mj_data.qvel[0] += mag * np.cos(angle)
+            sim.mj_data.qvel[1] += mag * np.sin(angle)
+
+
 @dataclass
 class RolloutResult:
     """Metrics + artifact for a single command-schedule rollout."""
@@ -247,13 +288,21 @@ def _run_single_rollout(
     video_width: int = 640,
     video_height: int = 360,
     fps: int = 25,
+    hard_eval_originals: dict[str, np.ndarray] | None = None,
+    hard_eval_rng: np.random.Generator | None = None,
 ) -> RolloutResult:
     """Run one schedule. After a fall the policy is replaced with zero
     actions so the sim stays stable, but the sim + renderer keep running to
     end-of-schedule so all rollouts produce equal-length videos (easy to
     compare across checkpoints). Tracking-error stats stop accumulating
-    once the robot is down — only live motion contributes."""
+    once the robot is down — only live motion contributes.
+
+    When ``hard_eval_originals`` and ``hard_eval_rng`` are both supplied,
+    per-rollout DR (mass/friction/damping scaling) and scheduled random
+    horizontal pushes are applied. Off by default."""
     sim.reset()
+    if hard_eval_originals is not None and hard_eval_rng is not None:
+        _hard_eval_apply_dr(sim, hard_eval_originals, hard_eval_rng)
     init_fn(sim)
     obs_processor.reset()
     if hasattr(policy, "reset"):
@@ -284,6 +333,9 @@ def _run_single_rollout(
             t = step * control_dt
             _, cmd_vx, cmd_vy, cmd_wz, cmd_h, _ = _scheduled_cmd(t, schedule)
             command_provider.manager.set_command(linear_x=cmd_vx, linear_y=cmd_vy, angular_z=cmd_wz, height=cmd_h)
+
+            if hard_eval_rng is not None:
+                _hard_eval_maybe_push(sim, hard_eval_rng, t_now=t, t_prev=t - control_dt)
 
             sim_state = sim.get_state()
             if fell:
@@ -357,14 +409,26 @@ def run_eval(
     video_width: int = 640,
     video_height: int = 360,
     fps: int = 25,
+    hard_eval_originals: dict[str, np.ndarray] | None = None,
+    hard_eval_seed: int | None = None,
 ) -> EvalResult:
     """Run every schedule in SCHEDULES against `checkpoint` and return
-    aggregated results."""
+    aggregated results.
+
+    If ``hard_eval_originals`` is supplied, every rollout runs with hard-eval
+    perturbations (DR + scheduled pushes). The per-rollout RNG is seeded by
+    ``(checkpoint_step, schedule_name, hard_eval_seed)`` so different
+    checkpoints face the same DR sequence per schedule — clean A/B."""
     policy = PolicyWrapper.from_config(checkpoint, config, device)
     step = _parse_step(checkpoint) or -1
     rollouts: list[RolloutResult] = []
     for name, schedule in SCHEDULES.items():
         video_path = out_dir / f"eval_{step:08d}_{name}.mp4"
+        rng = None
+        if hard_eval_originals is not None:
+            base_seed = 0 if hard_eval_seed is None else int(hard_eval_seed)
+            seed = (base_seed ^ (step * 1_000_003) ^ (hash(name) & 0xFFFFFFFF)) & 0xFFFFFFFF
+            rng = np.random.default_rng(seed)
         r = _run_single_rollout(
             sim=sim,
             obs_processor=obs_processor,
@@ -380,6 +444,8 @@ def run_eval(
             video_width=video_width,
             video_height=video_height,
             fps=fps,
+            hard_eval_originals=hard_eval_originals,
+            hard_eval_rng=rng,
         )
         rollouts.append(r)
     return EvalResult(step=step, checkpoint=checkpoint.name, rollouts=rollouts)
@@ -494,6 +560,21 @@ def main():
         "'stand' schedule (all-zero velocity) or to sweep height.",
     )
 
+    p.add_argument(
+        "--hard-eval",
+        action="store_true",
+        help="Per-rollout DR (mass/friction/damping in [0.85,1.15]/[0.7,1.3]/[0.7,1.3]) + "
+        "scheduled random horizontal pushes at t=3,6,9s (mag 0.5–1.0 m/s, random direction). "
+        "Use to separate checkpoints that all hit ceiling on the bare-bones eval.",
+    )
+    p.add_argument(
+        "--hard-eval-seed",
+        type=int,
+        default=0,
+        help="Base seed for the hard-eval per-(checkpoint, schedule) RNG. Different checkpoints "
+        "face the same DR sequence per schedule, so the comparison is clean A/B.",
+    )
+
     p.add_argument("--wandb-entity", type=str, default=None)
     p.add_argument("--wandb-project", type=str, default=None)
     p.add_argument(
@@ -516,6 +597,14 @@ def main():
     config, sim, obs_proc, act_proc, cmd_prov = build_once(args.config, args.mjcf, device)
 
     init_fn = partial(_init_base_pose, init_quat_wxyz=args.init_quat)
+
+    hard_eval_originals = _hard_eval_capture(sim) if args.hard_eval else None
+    if args.hard_eval:
+        print(
+            f"[hard-eval] enabled — DR mass{HARD_EVAL_MASS_RANGE} friction{HARD_EVAL_FRICTION_RANGE} "
+            f"damping{HARD_EVAL_DAMPING_RANGE}, pushes at {HARD_EVAL_PUSH_TIMES_S}s "
+            f"mag{HARD_EVAL_PUSH_MAG_RANGE} m/s, base seed={args.hard_eval_seed}"
+        )
 
     wb_run = None
     if not args.no_wandb and args.wandb_run_id:
@@ -561,6 +650,8 @@ def main():
             init_fn=init_fn,
             track_body=args.track_body,
             fall_height_m=args.fall_height,
+            hard_eval_originals=hard_eval_originals,
+            hard_eval_seed=args.hard_eval_seed,
         )
         dt = time.time() - t0
         per_rollout = "  ".join(
