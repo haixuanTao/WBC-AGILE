@@ -4,6 +4,12 @@
 
 AGILE is an [external Isaac Lab project](https://isaac-sim.github.io/IsaacLab/main/source/overview/own-project/template.html) that showcases how to build a full RL training pipeline on top of Isaac Lab, from task design and training to evaluation and sim-to-real deployment.
 
+```{note}
+These docs describe the current v1.3 release line. The archived
+[v1.2 documentation](https://nvidia-isaac.github.io/WBC-AGILE/v1.2/)
+remains available for users of the previous release.
+```
+
 <table align="center">
   <tr>
     <th colspan="2">Booster T1 - Stand-Up</th>
@@ -111,6 +117,7 @@ sim2mujoco
 
 remote-training
 testing
+AGILE v1.3.1 <releases/v1.3.1>
 AGILE v1.3.0 <releases/v1.3.0>
 Release note template <releases/_template>
 ```
