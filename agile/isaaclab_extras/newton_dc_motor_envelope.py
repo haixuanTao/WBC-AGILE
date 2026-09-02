@@ -55,12 +55,15 @@ _SATURATION_GROUPS: tuple[tuple[float, tuple[str, ...]], ...] = (
 @wp.kernel(enable_backward=False)
 def _dc_envelope_kernel(
     mjc_jnt_to_newton_dof: wp.array2d(dtype=wp.int32),
+    jnt_dofadr: wp.array(dtype=wp.int32),
     joint_qd: wp.array(dtype=wp.float32),
     sat: wp.array(dtype=wp.float32),
     eff: wp.array(dtype=wp.float32),
     vel: wp.array(dtype=wp.float32),
-    # output
+    base_damping: wp.array2d(dtype=wp.float32),
+    # outputs
     jnt_actfrcrange: wp.array2d(dtype=wp.vec2),
+    dof_damping: wp.array2d(dtype=wp.float32),
 ):
     world, jnt = wp.tid()
     dof = mjc_jnt_to_newton_dof[world, jnt]
@@ -73,19 +76,22 @@ def _dc_envelope_kernel(
     v = vel[dof]
     if v <= 0.0 or e <= 0.0:
         return
-    # Symmetric, lag-safe form. The range is computed from the velocity at the
-    # start of the step and applied through it; the four-quadrant form
-    # (drive-limited one way, brake-limited the other) turns into a feedback loop
-    # on a joint whose velocity flips sign every step -- the range lags one step,
-    # so the motor is allowed to push *with* the motion instead of against it
-    # (measured: x2 per step from the speed limit to 1e12 rad/s in five steps).
-    # Capping both directions by the curve at |qd| cannot drive the joint past
-    # its rated speed and cannot feed an oscillation; it gives up regenerative
-    # braking above the no-load speed, which the joint-limit and link dynamics
-    # cover.
     qd = wp.abs(joint_qd[dof])
+    # Drive side (symmetric, lag-safe): the motor cannot push a joint past its
+    # rated speed. Both directions capped by the curve at |qd|; the
+    # four-quadrant form lags one step and feeds a sign-alternating oscillation.
     cap = wp.clamp(s * (1.0 - qd / v), 0.0, e)
     jnt_actfrcrange[world, jnt] = wp.vec2(-cap, cap)
+    # Brake side: above no-load speed a DC motor is a generator, braking with a
+    # torque that rises linearly to the effort limit. Expressed as passive
+    # damping so MuJoCo integrates it implicitly -- it always opposes the
+    # *current* velocity and cannot go unstable. This is what stops a joint
+    # from running away once the drive cap has gone to zero.
+    md = jnt_dofadr[jnt]
+    brake = 0.0
+    if qd > v:
+        brake = wp.min(s * (qd / v - 1.0), e) / qd
+    dof_damping[world, md] = base_damping[world, md] + brake
 
 
 def _joint_name(label: str) -> str:
@@ -145,20 +151,24 @@ def apply_newton_dc_motor_envelope_patch() -> bool:
         eff_wp = wp.array(eff, dtype=wp.float32, device=device)
         vel_wp = wp.array(vel, dtype=wp.float32, device=device)
         nworld, njnt = mjw.jnt_actfrcrange.shape
+        if not hasattr(mjw, "jnt_dofadr") or not hasattr(mjw, "dof_damping"):
+            print("[newton] DC envelope: solver has no jnt_dofadr / dof_damping; not applied")
+            return
+        base_damping = wp.clone(mjw.dof_damping)   # Newton's own passive damping, kept underneath the brake
 
         def _apply_envelope():
             wp.launch(
                 _dc_envelope_kernel,
                 dim=(nworld, njnt),
-                inputs=[jnt_map, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp],
-                outputs=[mjw.jnt_actfrcrange],
+                inputs=[jnt_map, mjw.jnt_dofadr, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp, base_damping],
+                outputs=[mjw.jnt_actfrcrange, mjw.dof_damping],
                 device=device,
             )
 
         cls.register_post_actuator_callback(_apply_envelope)
         print(
             f"[newton] DC-motor torque-speed envelope active on {matched}/{model.joint_dof_count} DOFs "
-            f"({nworld} worlds x {njnt} joints) via jnt_actfrcrange"
+            f"({nworld} worlds x {njnt} joints) via jnt_actfrcrange + generator braking via dof_damping"
         )
 
     NewtonManager.initialize_solver = initialize_solver_with_envelope
