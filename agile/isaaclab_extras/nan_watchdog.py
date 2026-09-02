@@ -56,7 +56,7 @@ def apply_nan_watchdog_patch() -> bool:
     if getattr(ManagerBasedRLEnv, _SENTINEL, False):
         return False
 
-    state = {"n": 0, "prev": None}
+    state = {"n": 0, "prev": None, "hist": []}
 
     def _report_state(env, first_bad, snap):
         bad = ~torch.isfinite(snap[first_bad])
@@ -77,6 +77,49 @@ def apply_nan_watchdog_patch() -> bool:
             for k, v in prev.items():
                 if e < v.shape[0]:
                     print(f"    {k:24s} absmax={_fmt_absmax(v[e])}", flush=True)
+        # [newton] which joint, and what MuJoCo actually applied to it
+        try:
+            robot = env.scene["robot"]
+            names = list(robot.joint_names)
+            hist = state["hist"]
+            if hist:
+                print(f"\n[watchdog] max|joint_vel| of env {e} over the last {len(hist)} steps: "
+                      + " -> ".join(f"{h[e]:.3g}" for h in hist), flush=True)
+            pv = prev.get("joint_vel") if prev is not None else None
+            if pv is not None:
+                worst = torch.argsort(pv[e].abs(), descending=True)[:3].tolist()
+                print(f"[watchdog] fastest joints on the last good step: "
+                      + ", ".join(f"{names[j]}={pv[e][j].item():.1f} rad/s (pos {prev['joint_pos'][e][j].item():.2f})" for j in worst), flush=True)
+                from isaaclab_newton.physics import NewtonManager
+                s = NewtonManager._solver; mjw = s.mjw_model; mjd = s.mjw_data
+                jm = s.mjc_jnt_to_newton_dof.numpy()
+                labels = [l.rsplit("/", 1)[-1] for l in NewtonManager.get_model().joint_label]
+                qd_start = NewtonManager.get_model().joint_qd_start.numpy()
+                arm = mjw.dof_armature.numpy(); rng = mjw.jnt_range.numpy(); lim = mjw.jnt_limited.numpy()
+                qfa = mjd.qfrc_actuator.numpy(); qfc = mjd.qfrc_constraint.numpy(); qfp = mjd.qfrc_passive.numpy()
+                qfs = mjd.qfrc_smooth.numpy() if hasattr(mjd, "qfrc_smooth") else None
+                afr = mjw.jnt_actfrcrange.numpy()
+                for j in worst:
+                    jn = names[j]
+                    # newton joint index with this name in world e -> mjc joint index
+                    cand = [k for k, l in enumerate(labels) if l == jn]
+                    nj = cand[e] if e < len(cand) else (cand[0] if cand else -1)
+                    if nj < 0: continue
+                    d = int(qd_start[nj])
+                    mj = [k for k in range(jm.shape[1]) if int(jm[e, k]) == d]
+                    mj = mj[0] if mj else -1
+                    ld = d - int(qd_start[[k for k,l in enumerate(labels)][0]]) if False else None
+                    print(f"[watchdog]   {jn}: mjc_jnt={mj} newton_dof={d} armature={arm[e, mj] if mj>=0 and arm.ndim==2 else 'n/a'} "
+                          f"limited={bool(lim[mj]) if mj>=0 else 'n/a'} range={rng[e, mj].tolist() if mj>=0 else 'n/a'} actfrcrange={afr[e, mj].tolist() if mj>=0 else 'n/a'}", flush=True)
+                    # mujoco dof index for this joint = position of d within world e's dof list
+                    # MuJoCo dof index of this joint: authoritative via jnt_dofadr (1 dof per hinge)
+                    dofadr = mjw.jnt_dofadr.numpy()
+                    md = int(dofadr[mj]) if mj >= 0 else -1
+                    if md >= 0:
+                        print(f"[watchdog]     qfrc: actuator={qfa[e, md]:.1f} constraint={qfc[e, md]:.1f} passive={qfp[e, md]:.1f}"
+                              + (f" smooth={qfs[e, md]:.1f}" if qfs is not None else ""), flush=True)
+        except Exception as exc:
+            print(f"[watchdog]   (joint breakdown failed: {exc})", flush=True)
         print("=" * 78 + "\n", flush=True)
 
     def _report_obs(env, robot, obs_bad):
@@ -133,6 +176,11 @@ def apply_nan_watchdog_patch() -> bool:
                 snap["contact_net_forces_w"] = cf.detach().clone()
                 if first_bad is None and not torch.isfinite(cf).all():
                     first_bad = "contact_net_forces_w"
+        jv = snap.get("joint_vel")
+        if jv is not None:
+            state["hist"].append(jv.abs().amax(dim=1).detach().clone())
+            if len(state["hist"]) > 10:
+                state["hist"].pop(0)
         if first_bad is not None:
             _report_state(env, first_bad, snap)
         else:
