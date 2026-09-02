@@ -69,7 +69,8 @@ class relax_if_null_cmd_exp(ManagerTermBase):
         # Cache torque limits once during initialization (avoid CPU->GPU transfer every step)
         asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         asset = env.scene[asset_cfg.name]
-        _max_forces = asset.root_physx_view.get_dof_max_forces()
+        _max_forces = asset.data.joint_effort_limits  # [newton] was asset.root_physx_view.get_dof_max_forces()
+        _max_forces = _max_forces.torch if hasattr(_max_forces, "torch") else _max_forces
         _max_forces = wp.to_torch(_max_forces) if isinstance(_max_forces, wp.array) else _max_forces
         self.torque_limits = _max_forces[:, asset_cfg.joint_ids].to(env.device)
 
@@ -267,7 +268,10 @@ def torque_limits(
     joint_torques = robot.data.applied_torque.torch
 
     # Get joint torque limits
-    joint_torque_limits = robot.root_physx_view.get_dof_max_forces()
+    joint_torque_limits = robot.data.joint_effort_limits  # [newton] was robot.root_physx_view.get_dof_max_forces()
+    joint_torque_limits = (
+        joint_torque_limits.torch if hasattr(joint_torque_limits, "torch") else joint_torque_limits
+    )
     joint_torque_limits = (
         wp.to_torch(joint_torque_limits) if isinstance(joint_torque_limits, wp.array) else joint_torque_limits
     )
