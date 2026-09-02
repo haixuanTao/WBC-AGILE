@@ -71,6 +71,11 @@ class terrain_levels_vel_curriculum(ManagerTermBase):
         """
         # extract the used quantities (to enable type-hinting)
         terrain: TerrainImporter = env.scene.terrain
+        # A flat-plane terrain (no generator) has no levels to advance through:
+        # the curriculum is inert and reports level 0, which keeps the dependent
+        # "polish" curricula gated exactly as they are at level 0 on rough terrain.
+        if getattr(terrain, "terrain_levels", None) is None:
+            return 0.0
 
         traveled_distance = env.command_manager._terms[command_name].metrics["traveled_distance"][env_ids]
 
@@ -131,6 +136,11 @@ class terrain_levels_successful_termination(ManagerTermBase):
         """
         # extract the used quantities (to enable type-hinting)
         terrain: TerrainImporter = env.scene.terrain
+        # A flat-plane terrain (no generator) has no levels to advance through:
+        # the curriculum is inert and reports level 0, which keeps the dependent
+        # "polish" curricula gated exactly as they are at level 0 on rough terrain.
+        if getattr(terrain, "terrain_levels", None) is None:
+            return 0.0
 
         # find the envs that succeeded
         succeeded = env.termination_manager.get_term(successful_termination_term)[env_ids]
@@ -202,6 +212,11 @@ class terrain_levels_standing_at_timeout(ManagerTermBase):
             The mean terrain level for the given environment ids.
         """
         terrain: TerrainImporter = env.scene.terrain
+        # A flat-plane terrain (no generator) has no levels to advance through:
+        # the curriculum is inert and reports level 0, which keeps the dependent
+        # "polish" curricula gated exactly as they are at level 0 on rough terrain.
+        if getattr(terrain, "terrain_levels", None) is None:
+            return 0.0
 
         # Check prerequisite curriculum if configured (only until first activation)
         if not self._activated and prerequisite_curriculum is not None:
@@ -310,6 +325,11 @@ class terrain_levels_tracking_at_timeout(ManagerTermBase):
             The mean terrain level for the given environment ids.
         """
         terrain: TerrainImporter = env.scene.terrain
+        # A flat-plane terrain (no generator) has no levels to advance through:
+        # the curriculum is inert and reports level 0, which keeps the dependent
+        # "polish" curricula gated exactly as they are at level 0 on rough terrain.
+        if getattr(terrain, "terrain_levels", None) is None:
+            return 0.0
 
         # Check prerequisite curriculum if configured (only until first activation)
         if not self._activated and prerequisite_curriculum is not None:

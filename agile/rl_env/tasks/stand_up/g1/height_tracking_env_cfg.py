@@ -752,6 +752,16 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 15.0
         self.sim.dt = 1 / 200
         self.sim.render_interval = self.decimation
+        # [newton] Flat ground instead of the generated trimesh terrain.
+        # The foot collision spheres catch on the trimesh's internal triangle edges,
+        # which produces contacts with a horizontal normal; friction on a horizontal
+        # normal acts vertically and drags the foot down (measured: 84% of the
+        # spurious downward force is friction, 95% of those normals are horizontal).
+        # A plane has no internal edges. Off by default.
+        if os.environ.get("AGILE_NEWTON_FLAT_TERRAIN", "0") != "0":
+            self.scene.terrain.terrain_type = "plane"
+            self.scene.terrain.terrain_generator = None
+
         self.sim.physics_material = self.scene.terrain.physics_material
         self.scene.contact_forces.update_period = self.sim.dt
 
