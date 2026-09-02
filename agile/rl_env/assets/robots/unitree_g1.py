@@ -932,3 +932,27 @@ _ht_actuators["arms"].armature = 0.02
 _ht_actuators["arms"].friction = 0.01
 _ht_actuators["arms"].saturation_effort = 130.0
 del _ht_actuators
+
+# ---------------------------------------------------------------------------
+# [newton] Implicit (solver-side PD) actuators for the height-tracking task.
+#
+# AGILE's explicit DelayedDCMotor computes torque in Python and hands it to the
+# solver as an external force each physics step. On Newton (MuJoCo-Warp, explicit
+# Euler at 5 ms) that loop is unstable for this 29-DOF humanoid -- joint velocity
+# doubles every step against its own correctly-computed damping -- while the same
+# gains written as solver-side joint drives are stable (measured, see
+# NEWTON_PORT.md). So on this tree the height-tracking robot uses
+# DelayedImplicitActuatorCfg: identical stiffness, damping, effort/velocity limits,
+# armature, friction and command delay; only the DC-motor torque-speed saturation
+# curve (saturation_effort) is dropped. Task-model change, deliberately opted into.
+# Disable with AGILE_NEWTON_IMPLICIT_ACTUATORS=0 to get the original explicit model.
+# ---------------------------------------------------------------------------
+import dataclasses as _dc
+import os as _os
+
+if _os.environ.get("AGILE_NEWTON_IMPLICIT_ACTUATORS", "1") != "0":
+    _impl_fields = {f.name for f in _dc.fields(DelayedImplicitActuatorCfg)} - {"class_type"}
+    for _k, _cfg in list(G1_29DOF_HEIGHT_TRACKING.actuators.items()):
+        _kw = {f: getattr(_cfg, f) for f in _impl_fields if hasattr(_cfg, f)}
+        G1_29DOF_HEIGHT_TRACKING.actuators[_k] = DelayedImplicitActuatorCfg(**_kw)
+    del _k, _cfg, _kw, _impl_fields
