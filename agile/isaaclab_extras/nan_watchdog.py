@@ -108,13 +108,11 @@ def apply_nan_watchdog_patch() -> bool:
                     d = int(qd_start[nj])
                     mj = [k for k in range(jm.shape[1]) if int(jm[e, k]) == d]
                     mj = mj[0] if mj else -1
-                    ld = d - int(qd_start[[k for k,l in enumerate(labels)][0]]) if False else None
-                    print(f"[watchdog]   {jn}: mjc_jnt={mj} newton_dof={d} armature={arm[e, mj] if mj>=0 and arm.ndim==2 else 'n/a'} "
-                          f"limited={bool(lim[mj]) if mj>=0 else 'n/a'} range={rng[e, mj].tolist() if mj>=0 else 'n/a'} actfrcrange={afr[e, mj].tolist() if mj>=0 else 'n/a'}", flush=True)
-                    # mujoco dof index for this joint = position of d within world e's dof list
-                    # MuJoCo dof index of this joint: authoritative via jnt_dofadr (1 dof per hinge)
                     dofadr = mjw.jnt_dofadr.numpy()
                     md = int(dofadr[mj]) if mj >= 0 else -1
+                    print(f"[watchdog]   {jn}: mjc_jnt={mj} newton_dof={d} armature={(arm[e, md] if arm.ndim==2 else arm[md]) if md>=0 else 'n/a'} "
+                          f"limited={bool(lim[mj]) if mj>=0 else 'n/a'} range={rng[e, mj].tolist() if mj>=0 else 'n/a'} actfrcrange={afr[e, mj].tolist() if mj>=0 else 'n/a'}", flush=True)
+                    # mujoco dof index for this joint = position of d within world e's dof list
                     if md >= 0:
                         print(f"[watchdog]     qfrc: actuator={qfa[e, md]:.1f} constraint={qfc[e, md]:.1f} passive={qfp[e, md]:.1f}"
                               + (f" smooth={qfs[e, md]:.1f}" if qfs is not None else ""), flush=True)

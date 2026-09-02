@@ -18,11 +18,10 @@ actuator force on a joint, per world, per step, and MuJoCo-Warp evaluates it in
 patch rewrites it every physics step from the DC curve at the joint's current
 velocity::
 
-    tau_max(qd) = clip(sat * (1 - qd / vel),  0,  eff)
-    tau_min(qd) = clip(sat * (-1 - qd / vel), -eff, 0)
+    cap(qd) = clip(sat * (1 - |qd| / vel), 0, eff),   range = [-cap, +cap]
 
-which is exactly Isaac Lab's ``DCMotor._clip_effort`` applied to the solver's own
-PD force. It runs as a Newton post-actuator callback so it lives inside the
+the DC curve's available torque at the joint's speed, applied symmetrically
+(see the kernel for why the four-quadrant form is unsafe with a one-step lag). It runs as a Newton post-actuator callback so it lives inside the
 captured CUDA graph, before the substeps.
 
 Enable with ``AGILE_NEWTON_DC_ENVELOPE=1``; pair it with
@@ -74,10 +73,19 @@ def _dc_envelope_kernel(
     v = vel[dof]
     if v <= 0.0 or e <= 0.0:
         return
-    qd = joint_qd[dof]
-    tmax = wp.clamp(s * (1.0 - qd / v), 0.0, e)
-    tmin = wp.clamp(s * (-1.0 - qd / v), -e, 0.0)
-    jnt_actfrcrange[world, jnt] = wp.vec2(tmin, tmax)
+    # Symmetric, lag-safe form. The range is computed from the velocity at the
+    # start of the step and applied through it; the four-quadrant form
+    # (drive-limited one way, brake-limited the other) turns into a feedback loop
+    # on a joint whose velocity flips sign every step -- the range lags one step,
+    # so the motor is allowed to push *with* the motion instead of against it
+    # (measured: x2 per step from the speed limit to 1e12 rad/s in five steps).
+    # Capping both directions by the curve at |qd| cannot drive the joint past
+    # its rated speed and cannot feed an oscillation; it gives up regenerative
+    # braking above the no-load speed, which the joint-limit and link dynamics
+    # cover.
+    qd = wp.abs(joint_qd[dof])
+    cap = wp.clamp(s * (1.0 - qd / v), 0.0, e)
+    jnt_actfrcrange[world, jnt] = wp.vec2(-cap, cap)
 
 
 def _joint_name(label: str) -> str:
