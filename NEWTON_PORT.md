@@ -158,3 +158,58 @@ on by default), 1 substep: **1000/1000 iterations, 0 NaN, 1.23 s/iter at 4096 en
 impact spike at iteration 950 (return -54,797; `ground_slam`/`torso_slam` ~400x normal)
 degraded the policy over the last ~50 iterations. Contact dynamics remain the open
 risk. Launcher: `/workspace/bench/scripts/run_newton_implicit_train.sh <iters> <envs> <substeps> <integrator>`.
+
+## Contact pathology on the generated terrain (and `AGILE_NEWTON_FLAT_TERRAIN`)
+
+The Newton contact sensor reports large *pulling* (negative) normal forces on the
+feet that PhysX never reports — standing still, 217/1600 samples below -1 N with a
+worst case of -3432 N against a 324 N robot, versus 0/1600 and -0.6 N on PhysX.
+
+The feet are **not** adhering. Pull up with 2x body weight and they leave the
+ground more readily than on PhysX (+3.811 m vs +0.634 m in 1 s). The force is real
+but it is not a normal force:
+
+| foot contacts | normal.z | vertical force from normal | from friction | friction share |
+|---|---:|---:|---:|---:|
+| negative-Fz | median +0.000, 95.5% horizontal | -21.4 N | **-111.4 N** | **83.9%** |
+| ordinary ground contacts | median -1.000 | +54.7 N | +30.4 N | 35.8% |
+
+The negative population is a distinct class: horizontal contact normals,
+penetration pinned at exactly -5.00 mm, and 84% of the downward force carried by
+**friction**. That is the signature of the foot collision spheres catching on the
+*internal triangle edges* of the trimesh terrain — an edge contact yields a
+sideways normal, and friction on a sideways normal acts vertically.
+
+It matters because `net_forces_w` feeds `ground_slam` / `torso_slam` terminations
+and the foot-contact rewards, so the corruption reaches the learner. It is a
+plausible source of the contact-impact spike that poisoned the last 50 iterations
+of the 1000-iteration run.
+
+**Confirmed by removing the terrain.** Same probe, flat plane
+(`bench/scripts/foot_penetration_forensics.py`):
+
+| | trimesh terrain | flat plane |
+|---|---:|---:|
+| negative-Fz foot contacts | 156 / 1095 (14%) | **none** |
+| normal.z median | +0.000 (42-96% horizontal) | **+1.000** (0% horizontal) |
+| friction share of vertical force | 36% / 84% | **0.0%** |
+
+`AGILE_NEWTON_FLAT_TERRAIN=1` selects a plane instead of the generated terrain.
+Measured: 40/40 iterations, 0 NaN, 1.18 s/iter at 4096 envs. It changes the task
+(no rough ground, and the terrain-level curriculum is inert — though that
+curriculum never advanced past level 0 in the 1000-iteration run either).
+
+Two related notes:
+
+- **Friction combination.** MuJoCo combines friction with `max` unless geom
+  priorities differ, so AGILE's randomised foot mu (0.2-1.5) is clipped from below
+  by the terrain's mu=1.0: measured range on foot contacts is 0.897-1.499. Half the
+  randomisation is silently gone. Raising the foot geoms' `geom_priority`
+  post-compile halves the pulling samples (21.6% -> 10.8%, worst -3100 -> -2117 N)
+  but does not move mu below 1.0, so it has to be set before the MJWarp model is
+  built to take effect properly.
+- **Heightfield is the real fix for keeping rough terrain.** The path exists end to
+  end — `ModelBuilder.add_shape_heightfield`, `GeoType.HFIELD` -> `mjGEOM_HFIELD`
+  in `solver_mujoco.py`, and `HFIELD x SPHERE` in MuJoCo-Warp's collision table —
+  so importing Isaac Lab's generated terrain as a heightfield rather than a trimesh
+  would give correct up-normals with no internal edges. Not implemented here.
