@@ -69,7 +69,13 @@ class disable_joints(ManagerTermBase):
         asset._joint_effort_target_sim[rest_env_ids, :] = 0.0  # type: ignore
 
         # set the joint efforts to 0
-        asset.root_physx_view.set_dof_actuation_forces(asset._joint_effort_target_sim, rest_env_ids)  # type: ignore
+        # [newton] PhysX pushes through root_physx_view; Newton articulations have no
+        # such view and reach the solver through data._sim_bind_joint_effort instead.
+        _view = getattr(asset, "root_physx_view", None)
+        if _view is not None and hasattr(_view, "set_dof_actuation_forces"):
+            _view.set_dof_actuation_forces(asset._joint_effort_target_sim, rest_env_ids)  # type: ignore
+        else:
+            asset.data._sim_bind_joint_effort.assign(asset._joint_effort_target_sim)  # type: ignore
 
 
 def randomize_joint_parameters(

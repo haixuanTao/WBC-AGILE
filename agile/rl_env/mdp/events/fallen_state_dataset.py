@@ -49,6 +49,31 @@ _LEGACY_PHYSX_JOINT_ORDER = [
 ]
 
 
+def _push_zero_efforts(robot) -> None:
+    """Zero the joint efforts and push them straight to the solver.
+
+    [newton] PhysX exposes ``root_physx_view.set_dof_actuation_forces``; Newton
+    articulations have no such view. On Newton the effort buffer reaches the
+    solver through ``data._sim_bind_joint_effort``, which is what the asset's own
+    write path assigns to.
+    """
+    _as_torch(robot._joint_effort_target_sim)[:] = 0.0
+    view = getattr(robot, "root_physx_view", None)
+    if view is not None and hasattr(view, "set_dof_actuation_forces"):
+        view.set_dof_actuation_forces(robot._joint_effort_target_sim, robot._ALL_INDICES)
+    else:
+        robot.data._sim_bind_joint_effort.assign(robot._joint_effort_target_sim)
+
+
+def _as_torch(x):
+    """Torch view of a warp array / proxy array / tensor."""
+    if hasattr(x, "torch"):
+        return x.torch
+    if isinstance(x, wp.array):
+        return wp.to_torch(x)
+    return x
+
+
 @configclass
 class FallenStateDatasetCfg:
     """Configuration for fallen state dataset collection."""
@@ -233,6 +258,20 @@ class FallenStateDataset:
 
         decimation = env.cfg.decimation
 
+        # [newton] Zeroing the effort target only makes the robot limp when the PD
+        # runs in Python. With solver-side (implicit) actuators the drive keeps
+        # holding the pose, so the "fall" never happens. Zero the sim-side gains for
+        # the duration of the collection and restore them afterwards.
+        _saved_stiffness = _saved_damping = None
+        try:
+            _saved_stiffness = _as_torch(robot.data.joint_stiffness).clone()
+            _saved_damping = _as_torch(robot.data.joint_damping).clone()
+            robot.write_joint_stiffness_to_sim(torch.zeros_like(_saved_stiffness))
+            robot.write_joint_damping_to_sim(torch.zeros_like(_saved_damping))
+        except Exception as exc:  # pragma: no cover - backend without settable gains
+            print(f"[FallenStateDataset] could not zero joint gains for the fall: {exc}")
+            _saved_stiffness = _saved_damping = None
+
         try:
             # Collect states for each terrain level
             for level in range(self._num_terrain_levels):
@@ -255,8 +294,7 @@ class FallenStateDataset:
                         # Step simulation with disabled joints
                         for _ in range(decimation):
                             # Zero out joint efforts before physics (same as disable_joints event)
-                            wp.to_torch(robot._joint_effort_target_sim)[:] = 0.0
-                            robot.root_view.set_dof_actuation_forces(robot._joint_effort_target_sim, robot._ALL_INDICES)
+                            _push_zero_efforts(robot)
                             # Step physics with rendering enabled
                             env.sim.step()
 
@@ -288,6 +326,10 @@ class FallenStateDataset:
                 total_states = sum(self.get_num_states(lvl) for lvl in range(self._num_terrain_levels))
                 print(f"[FallenStateDataset] Collection complete: {total_states} total states")
         finally:
+            # Restore the solver-side gains zeroed for the limp fall
+            if _saved_stiffness is not None:
+                robot.write_joint_stiffness_to_sim(_saved_stiffness)
+                robot.write_joint_damping_to_sim(_saved_damping)
             # Re-enable terminations for normal training
             env._disable_terminations = False
             # Reset terrain levels to 0 (easiest) so training starts from curriculum beginning
