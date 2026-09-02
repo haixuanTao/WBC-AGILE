@@ -15,8 +15,9 @@
 
 
 import math
+import os
 
-from isaaclab_physx.physics import PhysxCfg
+from isaaclab_newton.physics import NewtonCfg, NewtonShapeCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
@@ -755,8 +756,23 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.scene.contact_forces.update_period = self.sim.dt
 
         if self.sim.physics is None:
-            self.sim.physics = PhysxCfg()
-        self.sim.physics.gpu_max_rigid_patch_count = 2**20
+            # [newton] Stabilization knobs, all no-ops at their defaults so the tree
+            # stays a pure PhysX->Newton swap unless explicitly opted in.
+            # See NEWTON_PORT.md for why this task needs them under Newton.
+            from isaaclab_newton.physics import MJWarpSolverCfg
+
+            self.sim.physics = NewtonCfg(
+                num_substeps=int(os.environ.get("AGILE_NEWTON_SUBSTEPS", "1")),
+                use_cuda_graph=os.environ.get("AGILE_NEWTON_CUDA_GRAPH", "1") != "0",
+                # MJWarp integrator: "euler" (Newton default) or "implicitfast"
+                # (MuJoCo's recommendation for stiff PD-driven articulations).
+                solver_cfg=MJWarpSolverCfg(integrator=os.environ.get("AGILE_NEWTON_INTEGRATOR", "euler")),
+                default_shape_cfg=NewtonShapeCfg(
+                    margin=float(os.environ.get("AGILE_NEWTON_MARGIN", "0.0")),
+                    gap=float(os.environ.get("AGILE_NEWTON_GAP", "0.01")),
+                ),
+            )
+        # [newton] PhysX-only knob, no Newton equivalent: self.sim.physics.gpu_max_rigid_patch_count = 2**20
 
         if self.scene.height_measurement_sensor is not None:
             self.scene.height_measurement_sensor.update_period = self.sim.dt
