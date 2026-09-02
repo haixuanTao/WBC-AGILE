@@ -213,3 +213,50 @@ Two related notes:
   in `solver_mujoco.py`, and `HFIELD x SPHERE` in MuJoCo-Warp's collision table —
   so importing Isaac Lab's generated terrain as a heightfield rather than a trimesh
   would give correct up-normals with no internal edges. Not implemented here.
+
+## What made the motion look wrong (and the fixes)
+
+Recording the first flat-ground policy showed a get-up that did not look like a
+robot. Three separate things were behind it, none of them the motors: measured
+against the DC-motor torque-speed curve, **0.0%** of applied torque exceeded what
+a real motor could deliver at that speed.
+
+1. **The training harness was in the video.** `LiftActionCfg` on `torso_link`
+   (5000 N/m, capped at 0.9x body weight) is a training-only action that the
+   `adaptive_lift` curriculum decays as the policy succeeds; it was still at 0.70
+   at the end of training, and a freshly built env starts it at 1.0.
+   `scripts/eval.py` strips it via `prepare_training_only_actions_for_evaluation`;
+   the recorder did not. Recorded properly, the same policy goes down and stays
+   down (pelvis 0.898 -> 0.089 m for 15 s). The recorder and the envelope probe
+   now strip it by default (`--keep-assist` to see the harness).
+
+2. **The post-step velocity clamp is not physics.** With it off, 12/29 joints
+   exceed their rated speed (shoulders 1.8x), and with it on they sit *exactly*
+   on the limit -- because it overwrites velocity after the solve, which removes
+   energy for free every step. A policy trained against it learns to lean on a
+   brake no real robot has. Replaced by the torque-speed curve itself, inside the
+   solver: `AGILE_NEWTON_DC_ENVELOPE=1` rewrites MuJoCo's per-joint
+   `jnt_actfrcrange` every physics step from
+   `tau_max(qd) = clip(sat (1 - qd/vel), 0, eff)` (and the mirror for `tau_min`),
+   as a graph-captured Newton post-actuator callback. Verified against the
+   solver's own `qfrc_actuator`: at 29.8 rad/s on a hip (limit 32) the range is
+   [-88, 54.4] and the applied force is 54.4. Effort limits themselves were
+   already enforced in-solver (`qfrc_actuator` peaks at exactly the limit).
+
+3. **Newton's joint-limit spring was what the clamp had been hiding.** With the
+   clamp off, bang-bang actions NaN the sim within ~40 control steps: actuator
+   force stays pinned at the effort limit while the *constraint* force runs to
+   1e8-1e10 and links tunnel metres into the ground. Newton hands MuJoCo each
+   joint limit as an explicit spring, `solref_limit = (-ke, -kd)` with the
+   builder default ke=1e4, kd=10 -- stiff and nearly undamped. MuJoCo's native
+   time-constant limit constraint, `solref = (0.02, 1.0)`, is critically damped
+   and stable by construction. `AGILE_NEWTON_LIMIT_SOLREF=0.02,1` writes it into
+   `jnt_solref` and zeroes the Newton-side `limit_ke` so the update kernel does
+   not restore the spring. Same probe: 200/200 steps, peak constraint force
+   8.7e3, penetration never past -4 cm. (Substeps, limit damping and the DC
+   envelope only delayed the blow-up; `AGILE_NEWTON_LIMIT_KD` never applied with
+   the clamp off, as it lives inside the clamp patch.)
+
+Full stack -- flat ground, implicit actuators, `implicitfast`, DC envelope,
+native joint limits, **velocity clamp off**: 60/60 iterations, 0 NaN, 1.17 s/iter
+at 4096 envs. Launcher: `bench/scripts/run_newton_physfix_train.sh`.
