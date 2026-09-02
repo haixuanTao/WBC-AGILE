@@ -34,6 +34,21 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+# Joint order that WBC-AGILE's PhysX backend enumerates for the G1 29-DOF, i.e. the
+# order every pre-existing (v6) fallen_states cache was written in. Used only when a
+# cache carries no "joint_names" of its own.
+_LEGACY_PHYSX_JOINT_ORDER = [
+    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint", "left_hip_roll_joint",
+    "right_hip_roll_joint", "waist_roll_joint", "left_hip_yaw_joint", "right_hip_yaw_joint",
+    "waist_pitch_joint", "left_knee_joint", "right_knee_joint", "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint", "left_ankle_pitch_joint", "right_ankle_pitch_joint",
+    "left_shoulder_roll_joint", "right_shoulder_roll_joint", "left_ankle_roll_joint",
+    "right_ankle_roll_joint", "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+    "left_elbow_joint", "right_elbow_joint", "left_wrist_roll_joint", "right_wrist_roll_joint",
+    "left_wrist_pitch_joint", "right_wrist_pitch_joint", "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+]
+
+
 @configclass
 class FallenStateDatasetCfg:
     """Configuration for fallen state dataset collection."""
@@ -128,6 +143,7 @@ class FallenStateDataset:
     _states_by_level: dict[int, dict[str, torch.Tensor]] = field(default_factory=dict)
     _num_terrain_levels: int = 0
     _num_joints: int = 0
+    _joint_names: list[str] | None = None
     _device: str = "cpu"
     _terrain_cell_size: tuple[float, float] = (8.0, 8.0)  # Default, will be updated from terrain config
     _is_flat_terrain: bool = False
@@ -170,6 +186,7 @@ class FallenStateDataset:
 
         self._device = "cpu"  # Store on CPU to save VRAM
         self._num_joints = robot.num_joints
+        self._joint_names = list(robot.joint_names)
 
         # Check if using generated terrain or flat plane
         self._is_flat_terrain = terrain.cfg.terrain_generator is None
@@ -619,6 +636,7 @@ class FallenStateDataset:
             },
             "num_terrain_levels": self._num_terrain_levels,
             "num_joints": self._num_joints,
+            "joint_names": self._joint_names,
             "terrain_cell_size": self._terrain_cell_size,
             "is_flat_terrain": self._is_flat_terrain,
             "states_by_level": self._states_by_level,
@@ -626,7 +644,7 @@ class FallenStateDataset:
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
         torch.save(save_dict, path)
 
-    def load(self, path: str) -> bool:
+    def load(self, path: str, target_joint_names: list[str] | None = None) -> bool:
         """Load dataset from disk.
 
         Args:
@@ -645,6 +663,26 @@ class FallenStateDataset:
             self._terrain_cell_size = save_dict.get("terrain_cell_size", (8.0, 8.0))
             self._is_flat_terrain = save_dict.get("is_flat_terrain", False)
             self._states_by_level = save_dict["states_by_level"]
+            # ---- [newton] joint-order remap -------------------------------------------
+            # joint_pos / joint_vel are stored by INDEX in the order of the backend that
+            # collected them. PhysX and Newton enumerate joints differently, so a cache
+            # collected on one and replayed on the other scrambles joints (measured: 47%
+            # of Newton resets put a joint past its limit). Remap columns by name.
+            source_names = save_dict.get("joint_names")
+            if source_names is None:
+                source_names = _LEGACY_PHYSX_JOINT_ORDER
+                print("[FallenStateDataset] cache has no joint_names; assuming legacy PhysX order")
+            if target_joint_names is not None and list(source_names) != list(target_joint_names):
+                perm = [list(source_names).index(n) for n in target_joint_names]
+                for level, st in self._states_by_level.items():
+                    for key in ("joint_pos", "joint_vel"):
+                        if key in st and st[key].dim() == 2 and st[key].shape[1] == len(perm):
+                            st[key] = st[key][:, perm].contiguous()
+                print(f"[FallenStateDataset] remapped joint columns by name: {len(perm)} joints, "
+                      f"{sum(1 for i, j in enumerate(perm) if i != j)} moved")
+                self._joint_names = list(target_joint_names)
+            else:
+                self._joint_names = list(source_names)
             return True
         except Exception as e:
             print(f"[FallenStateDataset] Failed to load from {path}: {e}")

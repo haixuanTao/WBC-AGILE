@@ -91,7 +91,7 @@ def _setup_dataset(
     if dataset_cfg.cache_enabled:
         cache_path = _get_cache_path(env, task_name, dataset_cfg)
 
-        if dataset.load(cache_path):
+        if dataset.load(cache_path, target_joint_names=list(env.scene["robot"].joint_names)):
             logger.info(f"Loaded {label} fallen state dataset from cache: {cache_path}")
             return dataset
 
