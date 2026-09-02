@@ -24,7 +24,7 @@ import os
 
 # Cache format version - increment this when the dataset format changes
 # to invalidate old caches
-_CACHE_VERSION = 6  # v6: Per-dataset config hashing for dual-dataset support
+_CACHE_VERSION = 7  # v7: states captured at rest (settle loop, zero velocity, in-limit poses)  # v6: Per-dataset config hashing for dual-dataset support
 
 
 def compute_fallen_state_cache_key(

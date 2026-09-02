@@ -86,7 +86,16 @@ class FallenStateDatasetCfg:
     """
 
     fall_duration_s: float = 1.0
-    """Duration to simulate falling with disabled joints (long enough for zero velocity)."""
+    """Duration to simulate falling with disabled joints before the settle phase."""
+
+    settle_max_s: float = 3.0
+    """[newton] Upper bound on the extra settling time after the fall; stops early once at rest."""
+
+    rest_joint_vel: float = 0.5
+    """[newton] Max joint speed (rad/s) for a robot to count as at rest."""
+
+    rest_root_vel: float = 0.1
+    """[newton] Max root speed (m/s) for a robot to count as at rest."""
 
     spawn_height_offset: float = 2.0
     """Extra height (meters) above default spawn height when dropping robots."""
@@ -266,8 +275,9 @@ class FallenStateDataset:
         try:
             _saved_stiffness = _as_torch(robot.data.joint_stiffness).clone()
             _saved_damping = _as_torch(robot.data.joint_damping).clone()
+            # zero the stiffness only: with the damping gone too, nothing stops a
+            # swinging limb and the "resting" states come out at the rated speed
             robot.write_joint_stiffness_to_sim(torch.zeros_like(_saved_stiffness))
-            robot.write_joint_damping_to_sim(torch.zeros_like(_saved_damping))
         except Exception as exc:  # pragma: no cover - backend without settable gains
             print(f"[FallenStateDataset] could not zero joint gains for the fall: {exc}")
             _saved_stiffness = _saved_damping = None
@@ -309,6 +319,23 @@ class FallenStateDataset:
                             for env_id in reset_ids:
                                 self._reset_single_env(env, env_id.item(), level)
                             level_reset_count += unstable.sum().item()
+
+                    # Keep stepping until the robots have actually come to rest
+                    # (max joint speed and root speed below threshold), bounded.
+                    settle_steps = int(self.cfg.settle_max_s / env.step_dt)
+                    for _s in range(settle_steps):
+                        jv = _as_torch(robot.data.joint_vel).abs().amax(dim=1)
+                        rv = _as_torch(robot.data.root_lin_vel_w).norm(dim=1)
+                        if (jv < self.cfg.rest_joint_vel).all() and (rv < self.cfg.rest_root_vel).all():
+                            break
+                        for _ in range(decimation):
+                            _push_zero_efforts(robot)
+                            env.sim.step()
+                        env.scene.update(dt=env.step_dt)
+                    if verbose:
+                        jv = _as_torch(robot.data.joint_vel).abs().amax(dim=1)
+                        print(f"    settled {int((jv < self.cfg.rest_joint_vel).sum())}/{env.num_envs} envs after {_s + 1} extra steps"
+                              f" (max joint speed {jv.max().item():.2f} rad/s)", flush=True)
 
                     # Capture final resting state (only once at the end)
                     self._capture_states(env, level, terrain)
@@ -579,9 +606,13 @@ class FallenStateDataset:
             root_pos_rel[:, 0] = torch.clamp(root_pos_rel[:, 0], -half_size_x, half_size_x)
             root_pos_rel[:, 1] = torch.clamp(root_pos_rel[:, 1], -half_size_y, half_size_y)
 
-        # Get joint states
-        joint_pos = robot.data.joint_pos.torch.clone()
-        joint_vel = robot.data.joint_vel.torch.clone()
+        # Get joint states -- captured as a resting state: positions clamped into
+        # the joint limits, velocities zero (the settle loop drives them there).
+        limits = _as_torch(robot.data.joint_pos_limits)
+        joint_pos = torch.minimum(torch.maximum(robot.data.joint_pos.torch.clone(), limits[..., 0]), limits[..., 1])
+        joint_vel = torch.zeros_like(robot.data.joint_vel.torch)
+        root_lin_vel = torch.zeros_like(root_lin_vel)
+        root_ang_vel = torch.zeros_like(root_ang_vel)
 
         # Get terrain type for each env (0 for flat terrain)
         if self._is_flat_terrain:

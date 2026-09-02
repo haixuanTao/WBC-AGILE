@@ -246,6 +246,20 @@ class reset_from_fallen_dataset(ManagerTermBase):
         root_pose = torch.cat([root_pos_w, states["root_quat"]], dim=-1)
         root_vel = torch.cat([states["root_lin_vel"], states["root_ang_vel"]], dim=-1)
 
+        # [newton] A fallen state is a *resting* state. The caches were captured
+        # after a fixed 1 s limp fall and hold joints at up to their rated speed,
+        # positions past their limits and root velocities of tens of m/s; on
+        # Newton (no in-solver velocity clamp) a joint dropped onto its limit at
+        # 37 rad/s diverges within a few steps. Clamp positions into the limits
+        # and start from rest.
+        joint_pos = states["joint_pos"]
+        joint_vel = torch.zeros_like(states["joint_vel"])
+        root_vel = torch.zeros_like(root_vel)
+        if isinstance(asset, Articulation):
+            limits = asset.data.joint_pos_limits
+            limits = (limits.torch if hasattr(limits, "torch") else limits)[env_ids]
+            joint_pos = torch.minimum(torch.maximum(joint_pos, limits[..., 0]), limits[..., 1])
+
         # Write to simulation
         asset.write_root_pose_to_sim(root_pose, env_ids)
         asset.write_root_velocity_to_sim(root_vel, env_ids)
@@ -253,7 +267,7 @@ class reset_from_fallen_dataset(ManagerTermBase):
         # Write joint state
         if isinstance(asset, Articulation):
             asset.write_joint_state_to_sim(
-                states["joint_pos"],
-                states["joint_vel"],
+                joint_pos,
+                joint_vel,
                 env_ids=env_ids,
             )
