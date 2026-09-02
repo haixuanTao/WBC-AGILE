@@ -16,6 +16,7 @@
 from . import (
     nan_watchdog,  # noqa: F401
     newton_dc_motor_envelope,  # noqa: F401
+    newton_joint_limit_solref,  # noqa: F401
     newton_joint_velocity_clamp,  # noqa: F401
     physx_articulation_com_cache,  # noqa: F401
     terrain_importer_plane_patch,  # noqa: F401
