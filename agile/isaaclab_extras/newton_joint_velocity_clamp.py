@@ -184,6 +184,11 @@ def apply_newton_joint_velocity_clamp_patch() -> bool:
                 STATS["clamped"] += int((excess > 0).sum())
                 STATS["removed_abs"] += float(excess.sum())
                 STATS["max_excess"] = max(STATS["max_excess"], float(excess.max()))
+                # periodic engagement report: how often the guard actually fires
+                if STATS["steps"] % 500 == 0:
+                    frac = STATS["clamped"] / max(STATS["elems"], 1)
+                    print(f"[clamp-stats] steps={STATS['steps']} engaged on {100*frac:.4f}% of joint samples, "
+                          f"max excess so far {STATS['max_excess']:.1f} rad/s", flush=True)
             # `_mask` (not `_index`) is the graph-capture-safe write path, and the
             # Newton config runs with use_cuda_graph=True.
             articulation.write_joint_velocity_to_sim_mask(velocity=clamped.contiguous())

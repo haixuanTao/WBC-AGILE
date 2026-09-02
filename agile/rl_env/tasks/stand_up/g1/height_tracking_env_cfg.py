@@ -762,6 +762,10 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.terrain.terrain_type = "plane"
             self.scene.terrain.terrain_generator = None
 
+        # [newton] diagnostic: AGILE_NEWTON_SELF_COLLISION=0 disables robot self-collision
+        if os.environ.get("AGILE_NEWTON_SELF_COLLISION", "1") == "0":
+            self.scene.robot.spawn.articulation_props.enabled_self_collisions = False
+
         self.sim.physics_material = self.scene.terrain.physics_material
         self.scene.contact_forces.update_period = self.sim.dt
 

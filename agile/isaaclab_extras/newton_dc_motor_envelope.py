@@ -61,6 +61,7 @@ def _dc_envelope_kernel(
     eff: wp.array(dtype=wp.float32),
     vel: wp.array(dtype=wp.float32),
     base_damping: wp.array2d(dtype=wp.float32),
+    vel_limit_gain: float,
     # outputs
     jnt_actfrcrange: wp.array2d(dtype=wp.vec2),
     dof_damping: wp.array2d(dtype=wp.float32),
@@ -91,6 +92,17 @@ def _dc_envelope_kernel(
     brake = 0.0
     if qd > v:
         brake = wp.min(s * (qd / v - 1.0), e) / qd
+        # PhysX enforces `velocity_limit_sim` unconditionally, in-solver. The
+        # generator brake above saturates at the effort limit, and a joint that
+        # is still being driven past its rated speed by the rest of the chain
+        # can end up a dozen turns outside its range, where MuJoCo's soft limit
+        # asks for an acceleration proportional to the violation and the solve
+        # goes non-finite. Add a damping band that rises steeply above the
+        # rated speed -- implicit, so any magnitude is stable -- which is the
+        # faithful port of PhysX's joint velocity limit.
+        if vel_limit_gain > 0.0:
+            band = vel_limit_gain * e / v * (qd - v) / qd
+            brake = wp.max(brake, band)
     dof_damping[world, md] = base_damping[world, md] + brake
 
 
@@ -155,12 +167,15 @@ def apply_newton_dc_motor_envelope_patch() -> bool:
             print("[newton] DC envelope: solver has no jnt_dofadr / dof_damping; not applied")
             return
         base_damping = wp.clone(mjw.dof_damping)   # Newton's own passive damping, kept underneath the brake
+        # AGILE_NEWTON_VEL_LIMIT_GAIN: torque per unit over-speed at 2x rated speed, in
+        # multiples of the effort limit (0 disables the band; 50 = a hard limit in practice)
+        vel_limit_gain = float(os.environ.get("AGILE_NEWTON_VEL_LIMIT_GAIN", "50"))
 
         def _apply_envelope():
             wp.launch(
                 _dc_envelope_kernel,
                 dim=(nworld, njnt),
-                inputs=[jnt_map, mjw.jnt_dofadr, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp, base_damping],
+                inputs=[jnt_map, mjw.jnt_dofadr, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp, base_damping, vel_limit_gain],
                 outputs=[mjw.jnt_actfrcrange, mjw.dof_damping],
                 device=device,
             )
@@ -169,6 +184,7 @@ def apply_newton_dc_motor_envelope_patch() -> bool:
         print(
             f"[newton] DC-motor torque-speed envelope active on {matched}/{model.joint_dof_count} DOFs "
             f"({nworld} worlds x {njnt} joints) via jnt_actfrcrange + generator braking via dof_damping"
+            + (f", velocity-limit band gain {vel_limit_gain:g}" if vel_limit_gain > 0 else "")
         )
 
     NewtonManager.initialize_solver = initialize_solver_with_envelope
