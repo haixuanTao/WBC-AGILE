@@ -16,7 +16,7 @@
 
 import pathlib
 
-from isaaclab_physx.physics import PhysxCfg
+from isaaclab_newton.physics import NewtonCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
@@ -627,8 +627,8 @@ class T1StandUpEnvCfg(ManagerBasedRLEnvCfg):
         self.scene.contact_forces.update_period = self.sim.dt
 
         if self.sim.physics is None:
-            self.sim.physics = PhysxCfg()
-        self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
+            self.sim.physics = NewtonCfg()
+        # [newton] PhysX-only knob, no Newton equivalent: self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
 
         if self.scene.height_measurement_sensor is not None:
             self.scene.height_measurement_sensor.update_period = self.sim.dt

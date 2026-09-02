@@ -16,7 +16,7 @@
 
 import math
 
-from isaaclab_physx.physics import PhysxCfg
+from isaaclab_newton.physics import NewtonCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
@@ -888,8 +888,8 @@ class G1LowerVelocityHeightEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
         if self.sim.physics is None:
-            self.sim.physics = PhysxCfg()
-        self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
+            self.sim.physics = NewtonCfg()
+        # [newton] PhysX-only knob, no Newton equivalent: self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
 
         # update sensor periods
         if self.scene.contact_forces is not None:
