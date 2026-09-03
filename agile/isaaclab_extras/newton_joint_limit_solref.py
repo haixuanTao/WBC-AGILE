@@ -72,6 +72,35 @@ def apply_newton_joint_limit_solref_patch() -> bool:
         ke_zero[:] = 0.0
         model.joint_limit_ke.assign(wp.array(ke_zero, dtype=wp.float32, device=model.device))
         print(f"[newton] joint-limit solref set to ({timeconst:g}, {dampratio:g}) on {n} joints; explicit limit spring disabled")
+        # AGILE_NEWTON_CONTACT_SOLREF=timeconst,dampratio : contact stiffness for every geom.
+        # MuJoCo default (0.02, 1) resolves an impact over ~4 physics steps at 5 ms; PhysX
+        # resolves it in one. 0.01 is MuJoCo's minimum (2 steps).
+        cs = os.environ.get("AGILE_NEWTON_CONTACT_SOLREF", "")
+        if cs:
+            # Newton derives MuJoCo's contact solref from its own shape materials on every
+            # property refresh: timeconst = 2/kd, dampratio = (kd/2) sqrt(1/ke)
+            # (kernels.convert_solref with unit width/impedance). Set the materials so any
+            # refresh reproduces the wanted solref, and write the MuJoCo array now as well.
+            # MuJoCo-Warp has no global override (OVERRIDE is unsupported).
+            try:
+                tc, dr = (float(x) for x in cs.split(","))
+                kd = 2.0 / tc
+                ke = (kd / 2.0 / dr) ** 2
+                ke_arr = model.shape_material_ke.numpy(); kd_arr = model.shape_material_kd.numpy()
+                ke_arr[:] = ke; kd_arr[:] = kd
+                model.shape_material_ke.assign(wp.array(ke_arr, dtype=wp.float32, device=model.device))
+                model.shape_material_kd.assign(wp.array(kd_arr, dtype=wp.float32, device=model.device))
+                if hasattr(mjw, "geom_solref"):
+                    gs = mjw.geom_solref.numpy(); gs[..., 0] = tc; gs[..., 1] = dr
+                    mjw.geom_solref.assign(wp.array(gs, dtype=wp.vec2, device=mjw.geom_solref.device))
+                try:
+                    from newton import SolverNotifyFlags
+                    cls.add_model_change(SolverNotifyFlags.SHAPE_PROPERTIES)
+                except Exception:
+                    pass
+                print(f"[newton] contact solref ({tc:g}, {dr:g}) via shape materials ke={ke:g} kd={kd:g} on {ke_arr.shape[0]} shapes")
+            except Exception as exc:
+                print(f"[newton] AGILE_NEWTON_CONTACT_SOLREF not applied: {exc}")
 
     NewtonManager.initialize_solver = initialize_solver_with_limit_solref
     setattr(NewtonManager, _SENTINEL, True)
