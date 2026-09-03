@@ -1,3 +1,4 @@
+import os
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -34,6 +35,14 @@ class G1HeightTrackingPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 100_000
     save_interval = 250
+    # [newton] Bound the raw policy output before it reaches the env. The joint
+    # action term clips what the simulator sees to +-6 rad, but `last_action` is
+    # observed raw (clip +-100): once the robot can no longer hold its height the
+    # policy pushes past +-6 where nothing changes in the world, the raw means
+    # random-walk outward (measured: p99 of |actions| 1.7 -> 85 between
+    # iterations 500 and 1000), the policy/critic inputs blow up, KL explodes,
+    # the adaptive schedule floors the learning rate and the run never recovers.
+    clip_actions = float(os.environ.get("AGILE_CLIP_ACTIONS", "10.0")) or None
     experiment_name = "height_tracking_g1"
     run_name = "height_tracking_g1"
     wandb_project = "HeightTracking-G1"
