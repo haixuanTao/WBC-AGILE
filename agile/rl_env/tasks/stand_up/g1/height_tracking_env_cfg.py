@@ -762,6 +762,12 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.terrain.terrain_type = "plane"
             self.scene.terrain.terrain_generator = None
 
+        # [newton] AGILE_NO_ASSIST=1: train without the lift harness at all (the action
+        # term and the curriculum that decays it), i.e. on the objective evaluation uses.
+        if os.environ.get("AGILE_NO_ASSIST", "0") == "1":
+            self.actions.lift = None
+            self.curriculum.adaptive_lift = None
+
         # [newton] diagnostic: AGILE_NEWTON_SELF_COLLISION=0 disables robot self-collision
         if os.environ.get("AGILE_NEWTON_SELF_COLLISION", "1") == "0":
             self.scene.robot.spawn.articulation_props.enabled_self_collisions = False
