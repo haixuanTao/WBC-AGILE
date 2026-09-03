@@ -17,13 +17,13 @@ def remove_training_only_actions(env_cfg) -> list[str]:
 
     for action_name in TRAINING_ONLY_ACTIONS:
         if getattr(actions_cfg, action_name, None) is not None:
-            delattr(actions_cfg, action_name)
+            setattr(actions_cfg, action_name, None)
             removed.append(action_name)
 
     curriculum_cfg = getattr(env_cfg, "curriculum", None)
     for curriculum_name in TRAINING_ONLY_CURRICULA:
         if curriculum_cfg is not None and getattr(curriculum_cfg, curriculum_name, None) is not None:
-            delattr(curriculum_cfg, curriculum_name)
+            setattr(curriculum_cfg, curriculum_name, None)
 
     return removed
 
@@ -38,7 +38,7 @@ def prepare_training_only_actions_for_evaluation(env_cfg) -> tuple[list[str], li
 
     for action_name in ASSISTANCE_ACTIONS:
         if getattr(actions_cfg, action_name, None) is not None:
-            delattr(actions_cfg, action_name)
+            setattr(actions_cfg, action_name, None)
             removed.append(action_name)
 
     for action_name in DEFAULT_POSITION_ACTIONS:
@@ -50,6 +50,6 @@ def prepare_training_only_actions_for_evaluation(env_cfg) -> tuple[list[str], li
     curriculum_cfg = getattr(env_cfg, "curriculum", None)
     for curriculum_name in TRAINING_ONLY_CURRICULA:
         if curriculum_cfg is not None and getattr(curriculum_cfg, curriculum_name, None) is not None:
-            delattr(curriculum_cfg, curriculum_name)
+            setattr(curriculum_cfg, curriculum_name, None)
 
     return removed, held_at_default

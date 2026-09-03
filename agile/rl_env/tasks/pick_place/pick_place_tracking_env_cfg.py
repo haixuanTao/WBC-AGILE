@@ -33,7 +33,10 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 
-import isaaclab_tasks.manager_based.manipulation.lift.mdp.rewards as lift_rewards
+try:  # Isaac Lab 3.0.0b2 layout
+    import isaaclab_tasks.manager_based.manipulation.lift.mdp.rewards as lift_rewards
+except ModuleNotFoundError:  # Isaac Lab develop layout
+    import isaaclab_tasks.contrib.lift.mdp.rewards as lift_rewards
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg

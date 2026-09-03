@@ -18,7 +18,10 @@
 
 # Import common MDP functions from IsaacLab
 from isaaclab.envs.mdp import *  # noqa: F401, F403
-from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *  # noqa: F401, F403
+try:  # Isaac Lab 3.0.0b2 layout
+    from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *  # noqa: F401, F403
+except ModuleNotFoundError:  # Isaac Lab develop layout
+    from isaaclab_tasks.core.velocity.mdp import *  # noqa: F401, F403
 
 # Import custom MDP functions for G1 robot
 from .actions import *  # noqa: F401, F403
