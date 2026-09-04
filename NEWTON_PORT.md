@@ -260,3 +260,56 @@ a real motor could deliver at that speed.
 Full stack -- flat ground, implicit actuators, `implicitfast`, DC envelope,
 native joint limits, **velocity clamp off**: 60/60 iterations, 0 NaN, 1.17 s/iter
 at 4096 envs. Launcher: `bench/scripts/run_newton_physfix_train.sh`.
+
+## Where the energy comes from (audit), and the newest stack
+
+**"The body accelerates far beyond what the actuators put in."** True, and
+measured: peak pelvis accelerations of 25-30 g on flat ground. The audit
+(`bench/scripts/energy_audit.py`, `com_readout_check.py`, `drop_impact_compare.py`)
+puts the energy where it belongs:
+
+* Position- and velocity-based COM accelerations agree to 0.1 g; at the peaks the
+  contact sensor reads 8.0 kN on a 33 kg robot (8027 N / 33 kg = 24.8 g). The
+  impulses are the *ground*, not the motors, and not the solver inventing
+  momentum. In flight (no contact) the per-step energy residual is median -0.3 J,
+  worst +3.1 J, net dissipative.
+* Same 0.5 m drop on both engines: Newton 9.6 kN / 28 g, **PhysX 19.7 kN / 53 g**.
+  PhysX hits twice as hard. (MuJoCo-Warp's root-dof `qfrc_constraint` is stale
+  most steps and must not be used for this; the contact sensor is reliable.)
+* Contact stiffness is derived by Newton from its shape materials
+  (`timeconst = 2/kd`, defaults land on 0.02 s = four physics steps);
+  `AGILE_NEWTON_CONTACT_SOLREF=0.01,1` gives a PhysX-like two-step contact:
+  20.4 kN / 61 g on the same drop. MuJoCo-Warp has no global override.
+
+**"The moment about the COM has the wrong sign."** With every joint locked (one
+rigid body) the contact moment is correct: feet 0.25 m behind the COM with +1.3 kN
+pitch the body nose-down in 8/8 envs, angular momentum +5.2 to +7.0 kg m^2/s, and
+the solver's own contact torques match dL/dt at cosine 0.996-0.998. With the
+joints PD-held the *torso* pitches nose-up while total angular momentum barely
+moves: the implicit PD snaps the legs back on impact and throws the torso the
+other way. Momentum is conserved; it is a task-model (actuator) effect, stronger
+on Newton than PhysX because Newton's default contact is softer.
+
+**Arms.** Not physically locked (full torque caps, zero extra damping); the
+policy commands them ~0.3 rad while the legs sweep 3-4 rad. The arm-deviation
+penalty only applies above 0.4 m, the arms are 25 Nm / 5 Nm against 88-139 Nm
+legs, and nothing rewards using them.
+
+**Isaac Lab `develop` + Newton 1.5.1** (branch `newton-port-dev`, a layered venv
+under `/workspace/IsaacLab-dev/.venv-lite`): same physics. Stock: joint pushed
+into its limit runs 3.15 rad past at 426 rad/s and NaNs; bang-bang NaNs at step
+18; reset-stress NaNs at step 236; drop 9.4 kN / 27.7 g. With the patches from
+this tree attached (they fit the 1.5.1 internals): limit holds at 0.065 rad,
+bang-bang survives 200/200, reset-stress 1500/1500. The one patch upstream now
+carries is the warm-start-after-NaN clear (isaaclab_newton 1.6.2). Newton 1.5.1's
+MuJoCo solver still lists `joint_velocity_limit` as unsupported and still ships
+`limit_ke=1e4, limit_kd=10` as the joint-limit default.
+
+**Training without the harness** (`AGILE_NO_ASSIST=1`, fine-tuned from the
+iteration-7000 checkpoint of the fixed run): 0 NaN over 10,000 + 8,500
+iterations, height error 0.16 -> 0.036 m, velocity clamp engaged on 0.0014% of
+joint samples. Harness-free recordings stand up from the floor twice per episode,
+to 0.65-0.71 m. Converged around iteration 25,000: tracking keeps sharpening, the
+get-up does not improve, reward oscillates -19..-65 without trend. What the reward
+does not yet ask for on flat ground: soft landings (slam penalties are gated
+behind the terrain curriculum) and holding the standing height.
