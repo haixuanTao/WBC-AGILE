@@ -138,6 +138,12 @@ def apply_newton_heightfield_terrain_patch() -> bool:
         native = hasattr(NewtonManager, "_inject_terrain_heightfields")
     except Exception:
         pass
+    # AGILE_NEWTON_HEIGHTFIELD_NATIVE=1 uses Isaac Lab develop's own conversion instead of this
+    # wrapper. Off by default: the native path is one heightfield (no tiling, see
+    # AGILE_NEWTON_HEIGHTFIELD_TILE) and, on Newton 1.5.x, needs the geom_pos fix below;
+    # measured on develop, wrapper + 8 m tiles: 0.0% of terrain contacts deeper than 5 cm,
+    # native: 0.2%, with the deep ones at -1.5..-2.8 m.
+    native = native and os.environ.get("AGILE_NEWTON_HEIGHTFIELD_NATIVE", "0") != "0"
     if native:
         print("[newton] heightfield: Isaac Lab has native terrain heightfields -> using convert_to_heightfield; "
               "wrapper only keeps the terrain mesh for diagnostics")
@@ -166,16 +172,23 @@ def apply_newton_heightfield_terrain_patch() -> bool:
     original_add_usd = ModelBuilder.add_usd
 
     def add_usd_with_heightfield(self, source, *args, **kwargs):
-        if not CAPTURED or kwargs.get("root_path", "/") != "/":
+        # Isaac Lab 3.0.0b2 imports the whole stage once (root "/"); develop imports it one
+        # top-level prim at a time ("/World/ground", "/World/envs/env_0", ...). Act on any call
+        # whose root contains a captured terrain prim, once per terrain.
+        rp = str(kwargs.get("root_path", "/") or "/").rstrip("/") or "/"
+        hits = {name: info for name, info in CAPTURED.items()
+                if not info.get("added") and (rp == "/" or info["prim_path"] == rp or info["prim_path"].startswith(rp + "/"))}
+        if not hits:
             return original_add_usd(self, source, *args, **kwargs)
         ignore = list(kwargs.get("ignore_paths") or [])
-        for info in CAPTURED.values():
+        for info in hits.values():
             ignore.append(info["prim_path"])           # exact path -> excludePaths of the physics parser
+            info["added"] = True
         kwargs["ignore_paths"] = ignore
         out = original_add_usd(self, source, *args, **kwargs)
         res = float(os.environ.get("AGILE_NEWTON_HEIGHTFIELD_RES", "0.1"))
         margin = float(os.environ.get("AGILE_NEWTON_HEIGHTFIELD_MARGIN", "12.0"))
-        for name, info in CAPTURED.items():
+        for name, info in hits.items():
             mesh = info["mesh"]; b = mesh.bounds  # (2, 3)
             shrink = max(info["border"] - margin, 0.0)
             x_min, x_max = b[0, 0] + shrink, b[1, 0] - shrink
