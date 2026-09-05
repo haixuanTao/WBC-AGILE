@@ -24,6 +24,41 @@ import torch
 _SENTINEL = "_agile_newton_reset_warmstart_patch_applied"
 
 
+def clear_solver_warmstart(env_ids, warn_owner=None) -> bool:
+    """Zero the per-world solver memory (``qacc_warmstart``, ``qacc``, ``qfrc_constraint``)
+    of the given worlds. Used after every env reset and by the fallen-state collector
+    after it re-spawns a blown-up env: a world that went non-finite otherwise stays
+    non-finite through any number of state writes (measured on Isaac Lab develop:
+    one env re-read NaN joints right after each reset until the process ended).
+
+    Returns:
+        True if the buffers were cleared.
+    """
+    try:
+        import warp as wp
+        from isaaclab_newton.physics import NewtonManager
+
+        mjd = NewtonManager._solver.mjw_data
+        ids = env_ids if isinstance(env_ids, torch.Tensor) else torch.as_tensor(env_ids)
+        if ids.numel() == 0:
+            return True
+        ids = ids.to(device=wp.device_to_torch(mjd.qacc_warmstart.device), dtype=torch.long)
+        for name in ("qacc_warmstart", "qacc", "qfrc_constraint"):
+            arr = getattr(mjd, name, None)
+            if arr is None:
+                continue
+            t = wp.to_torch(arr)
+            # per-world rows only; flat constraint-row arrays (efc.*) are rebuilt every step
+            if t.dim() >= 2 and t.shape[0] >= int(ids.max()) + 1:
+                t[ids] = 0.0
+        return True
+    except Exception as exc:  # never break a reset over this
+        if warn_owner is not None and not getattr(warn_owner, "_agile_warmstart_warned", False):
+            print(f"[newton] reset warm-start clear failed: {exc}", flush=True)
+            warn_owner._agile_warmstart_warned = True
+        return False
+
+
 def apply_newton_reset_warmstart_patch() -> bool:
     if os.environ.get("AGILE_NEWTON_RESET_WARMSTART", "0") != "1":
         return False
@@ -37,24 +72,7 @@ def apply_newton_reset_warmstart_patch() -> bool:
 
     def _reset_idx_with_warmstart_clear(self, env_ids):
         out = original_reset_idx(self, env_ids)
-        try:
-            from isaaclab_newton.physics import NewtonManager
-            import warp as wp
-
-            mjd = NewtonManager._solver.mjw_data
-            ids = env_ids if isinstance(env_ids, torch.Tensor) else torch.as_tensor(env_ids)
-            ids = ids.to(device=wp.device_to_torch(mjd.qacc_warmstart.device), dtype=torch.long)
-            for name in ("qacc_warmstart", "qacc", "qfrc_constraint", "efc_force"):
-                arr = getattr(mjd, name, None) if name != "efc_force" else getattr(getattr(mjd, "efc", None), "force", None)
-                if arr is None:
-                    continue
-                t = wp.to_torch(arr)
-                if t.dim() >= 1 and t.shape[0] >= int(ids.max()) + 1:
-                    t[ids] = 0.0
-        except Exception as exc:  # never break a reset over this
-            if not getattr(self, "_agile_warmstart_warned", False):
-                print(f"[newton] reset warm-start clear failed: {exc}", flush=True)
-                self._agile_warmstart_warned = True
+        clear_solver_warmstart(env_ids, warn_owner=self)
         return out
 
     ManagerBasedRLEnv._reset_idx = _reset_idx_with_warmstart_clear
