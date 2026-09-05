@@ -66,9 +66,65 @@ def rasterize(mesh, x_min, x_max, y_min, y_max, res, device):
     return h, nrow, ncol
 
 
+_GEOM_POS_SENTINEL = "_agile_hfield_geom_pos_fix_applied"
+
+
+def apply_newton_hfield_geom_pos_fix() -> bool:
+    """Newton 1.5.x: per-world ``mjw_model.geom_pos`` of a heightfield drops ``min_z``.
+
+    ``SolverMuJoCo`` builds the MuJoCo spec with the heightfield geom at
+    ``xform.p.z + min_z`` (so the surface spans ``[min_z, max_z]``), but
+    ``_update_geom_properties`` -- run on every ``SHAPE_PROPERTIES`` notification,
+    including model init -- rewrites the per-world ``geom_pos`` from the Newton shape
+    transform alone. Measured on Isaac Lab develop with AGILE's terrain
+    (``min_z = -0.14``): the MuJoCo model had the geom at z=-0.14, the Warp model at
+    z=0, and every terrain contact sat 0.14 m above the mesh (median +0.1398, p90
+    0.1412). Every reset then starts 14 cm inside the ground.
+
+    This wraps ``_update_geom_properties`` and copies the MuJoCo model's heightfield
+    geom positions back into all worlds afterwards. No-op where the two already agree
+    (Newton 1.2 measured -0.4 mm without it).
+    """
+    try:
+        import mujoco
+        from newton.solvers import SolverMuJoCo
+    except Exception:
+        return False
+    if getattr(SolverMuJoCo, _GEOM_POS_SENTINEL, False):
+        return False
+    original = SolverMuJoCo._update_geom_properties
+
+    def _update_geom_properties_with_hfield_fix(self):
+        original(self)
+        try:
+            mj, mjw = self.mj_model, self.mjw_model
+            hg = [g for g in range(mj.ngeom) if mj.geom_type[g] == mujoco.mjtGeom.mjGEOM_HFIELD]
+            if not hg:
+                return
+            gp = wp.to_torch(mjw.geom_pos)  # (nworld, ngeom) vec3 or (ngeom,) vec3
+            fixed = 0
+            for g in hg:
+                want = mj.geom_pos[g]
+                cur = gp[..., g, :]
+                if (cur - cur.new_tensor(want)).abs().max().item() > 1e-6:
+                    cur[...] = cur.new_tensor(want)
+                    fixed += 1
+            if fixed and not getattr(self, "_agile_hfield_geom_pos_reported", False):
+                self._agile_hfield_geom_pos_reported = True
+                print(f"[newton] heightfield: restored min_z offset on {fixed} hfield geom(s) in all worlds "
+                      f"(z={mj.geom_pos[hg[0]][2]:+.4f}; Newton's geom sync had dropped it)", flush=True)
+        except Exception as exc:  # never break the sim over the fix
+            print(f"[newton] heightfield geom_pos fix skipped: {exc}", flush=True)
+
+    SolverMuJoCo._update_geom_properties = _update_geom_properties_with_hfield_fix
+    setattr(SolverMuJoCo, _GEOM_POS_SENTINEL, True)
+    return True
+
+
 def apply_newton_heightfield_terrain_patch() -> bool:
     if os.environ.get("AGILE_NEWTON_HEIGHTFIELD", "0") != "1":
         return False
+    apply_newton_hfield_geom_pos_fix()
     try:
         from isaaclab.terrains.terrain_importer import TerrainImporter
         from newton import Heightfield, ModelBuilder
@@ -76,6 +132,15 @@ def apply_newton_heightfield_terrain_patch() -> bool:
         return False
     if getattr(ModelBuilder, _SENTINEL, False):
         return False
+    native = False
+    try:  # Isaac Lab develop converts tagged terrains itself (SubTerrainBaseCfg.convert_to_heightfield)
+        from isaaclab_newton.physics import NewtonManager
+        native = hasattr(NewtonManager, "_inject_terrain_heightfields")
+    except Exception:
+        pass
+    if native:
+        print("[newton] heightfield: Isaac Lab has native terrain heightfields -> using convert_to_heightfield; "
+              "wrapper only keeps the terrain mesh for diagnostics")
 
     # 1) capture the generated trimesh when it is imported
     original_import_mesh = TerrainImporter.import_mesh
@@ -94,6 +159,9 @@ def apply_newton_heightfield_terrain_patch() -> bool:
 
     TerrainImporter.import_mesh = import_mesh_and_capture
 
+    if native:
+        setattr(ModelBuilder, _SENTINEL, True)
+        return False
     # 2) swap the collider at model-build time
     original_add_usd = ModelBuilder.add_usd
 
@@ -113,13 +181,36 @@ def apply_newton_heightfield_terrain_patch() -> bool:
             x_min, x_max = b[0, 0] + shrink, b[1, 0] - shrink
             y_min, y_max = b[0, 1] + shrink, b[1, 1] - shrink
             h, nrow, ncol = rasterize(mesh, x_min, x_max, y_min, y_max, res, wp.get_preferred_device())
-            hx = (ncol - 1) * res / 2.0; hy = (nrow - 1) * res / 2.0
-            cx = x_min + hx; cy = y_min + hy
-            hf = Heightfield(data=h, nrow=nrow, ncol=ncol, hx=hx, hy=hy, min_z=float(h.min()), max_z=float(h.max()))
             cfg = ModelBuilder.ShapeConfig(mu=info["mu"], restitution=0.0, density=0.0)
-            sid = self.add_shape_heightfield(xform=wp.transform(wp.vec3(cx, cy, 0.0), wp.quat_identity()), heightfield=hf, cfg=cfg, label=f"{info['prim_path']}/heightfield")
+            # AGILE_NEWTON_HEIGHTFIELD_TILE (m): split the raster into tiles, each its own
+            # heightfield shape centred on itself. MuJoCo-Warp's heightfield collision
+            # reports spurious deep contacts whose depth grows with the distance from the
+            # heightfield origin (measured: -0.1 m at the centre column, -1.5..-2.8 m at
+            # +-32 m), so keeping every point within a few metres of its shape origin
+            # sidesteps it. Tiles overlap by one sample row/column, so the surface is
+            # identical at the seams. 0 (default) = one heightfield.
+            tile_m = float(os.environ.get("AGILE_NEWTON_HEIGHTFIELD_TILE", "0"))
+            tile_n = int(round(tile_m / res)) if tile_m > 0 else 0
+            sids = []
+            r_edges = list(range(0, nrow - 1, tile_n)) + [nrow - 1] if tile_n else [0, nrow - 1]
+            c_edges = list(range(0, ncol - 1, tile_n)) + [ncol - 1] if tile_n else [0, ncol - 1]
+            for r0, r1 in zip(r_edges[:-1], r_edges[1:]):
+                for c0, c1 in zip(c_edges[:-1], c_edges[1:]):
+                    ht = np.ascontiguousarray(h[r0:r1 + 1, c0:c1 + 1])
+                    nr, nc = ht.shape
+                    if nr < 2 or nc < 2:
+                        continue
+                    hx = (nc - 1) * res / 2.0; hy = (nr - 1) * res / 2.0
+                    cx = x_min + c0 * res + hx; cy = y_min + r0 * res + hy
+                    zmin, zmax = float(ht.min()), float(ht.max())
+                    if zmax - zmin < 1e-4:  # flat tile: keep a non-degenerate z range
+                        zmax = zmin + 1e-4
+                    hf = Heightfield(data=ht, nrow=nr, ncol=nc, hx=hx, hy=hy, min_z=zmin, max_z=zmax)
+                    sids.append(self.add_shape_heightfield(xform=wp.transform(wp.vec3(cx, cy, 0.0), wp.quat_identity()), heightfield=hf, cfg=cfg,
+                                                           label=f"{info['prim_path']}/heightfield_{len(sids)}"))
             info["raster"] = dict(h=h, x_min=x_min, y_min=y_min, res=res, nrow=nrow, ncol=ncol)
-            print(f"[newton] heightfield: terrain '{name}' -> {nrow}x{ncol} cells @ {res} m over x[{x_min:.1f},{x_max:.1f}] y[{y_min:.1f},{y_max:.1f}], z[{h.min():.3f},{h.max():.3f}], shape {sid}; trimesh collider excluded", flush=True)
+            print(f"[newton] heightfield: terrain '{name}' -> {nrow}x{ncol} cells @ {res} m over x[{x_min:.1f},{x_max:.1f}] y[{y_min:.1f},{y_max:.1f}], "
+                  f"z[{h.min():.3f},{h.max():.3f}], {len(sids)} shape(s)" + (f" (tiles of {tile_m:g} m)" if tile_n else "") + "; trimesh collider excluded", flush=True)
         return out
 
     ModelBuilder.add_usd = add_usd_with_heightfield

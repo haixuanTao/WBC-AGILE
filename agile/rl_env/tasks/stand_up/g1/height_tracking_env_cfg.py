@@ -762,6 +762,19 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.terrain.terrain_type = "plane"
             self.scene.terrain.terrain_generator = None
 
+        if os.environ.get("AGILE_NEWTON_HEIGHTFIELD", "0") == "1" and self.scene.terrain.terrain_generator is not None:
+            # Isaac Lab develop: native Newton heightfield collider (all sub-terrains must opt in).
+            # On 3.0.0b2 the flag does not exist and agile.isaaclab_extras.newton_heightfield_terrain does the swap.
+            for sub_cfg in self.scene.terrain.terrain_generator.sub_terrains.values():
+                if hasattr(sub_cfg, "convert_to_heightfield"):
+                    sub_cfg.convert_to_heightfield = True
+            # The 100 m flat border makes the native heightfield 264 m wide (2641x2721 cells);
+            # measured on develop: spurious deep terrain contacts grow with distance from the
+            # heightfield centre (-0.1 m at the middle column, -1.8 m at the outer ones), and the
+            # limp-fall blow-ups sit in exactly those outer cells. A robot never gets 20 m out.
+            self.scene.terrain.terrain_generator.border_width = float(
+                os.environ.get("AGILE_NEWTON_HEIGHTFIELD_BORDER", "20.0")
+            )
         # [newton] AGILE_NO_ASSIST=1: train without the lift harness at all (the action
         # term and the curriculum that decays it), i.e. on the objective evaluation uses.
         if os.environ.get("AGILE_NO_ASSIST", "0") == "1":
