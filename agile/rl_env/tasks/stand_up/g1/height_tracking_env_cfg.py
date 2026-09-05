@@ -764,10 +764,12 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
 
         if os.environ.get("AGILE_NEWTON_HEIGHTFIELD", "0") == "1" and self.scene.terrain.terrain_generator is not None:
             # Isaac Lab develop: native Newton heightfield collider (all sub-terrains must opt in).
-            # On 3.0.0b2 the flag does not exist and agile.isaaclab_extras.newton_heightfield_terrain does the swap.
-            for sub_cfg in self.scene.terrain.terrain_generator.sub_terrains.values():
-                if hasattr(sub_cfg, "convert_to_heightfield"):
-                    sub_cfg.convert_to_heightfield = True
+            # On 3.0.0b2 the flag does not exist and agile.isaaclab_extras.newton_heightfield_terrain does the swap;
+            # The wrapper (tiled) is the default on develop too; AGILE_NEWTON_HEIGHTFIELD_NATIVE=1 opts into the native path.
+            if os.environ.get("AGILE_NEWTON_HEIGHTFIELD_NATIVE", "0") != "0":
+                for sub_cfg in self.scene.terrain.terrain_generator.sub_terrains.values():
+                    if hasattr(sub_cfg, "convert_to_heightfield"):
+                        sub_cfg.convert_to_heightfield = True
             # Both paths: the 100 m flat border makes a single heightfield 264 m wide
             # (2641x2721 cells) for nothing -- a robot never gets 20 m out. (It does not by
             # itself change MuJoCo-Warp's radial deep-contact artefact; tiling does, see
