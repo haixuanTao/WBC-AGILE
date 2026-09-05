@@ -212,7 +212,8 @@ Two related notes:
   end — `ModelBuilder.add_shape_heightfield`, `GeoType.HFIELD` -> `mjGEOM_HFIELD`
   in `solver_mujoco.py`, and `HFIELD x SPHERE` in MuJoCo-Warp's collision table —
   so importing Isaac Lab's generated terrain as a heightfield rather than a trimesh
-  would give correct up-normals with no internal edges. Not implemented here.
+  would give correct up-normals with no internal edges. Implemented and measured
+  below ("Heightfield terrain").
 
 ## What made the motion look wrong (and the fixes)
 
@@ -313,3 +314,79 @@ to 0.65-0.71 m. Converged around iteration 25,000: tracking keeps sharpening, th
 get-up does not improve, reward oscillates -19..-65 without trend. What the reward
 does not yet ask for on flat ground: soft landings (slam penalties are gated
 behind the terrain curriculum) and holding the standing height.
+
+## Heightfield terrain (`AGILE_NEWTON_HEIGHTFIELD=1`) -- measured
+
+`agile/isaaclab_extras/newton_heightfield_terrain.py` keeps the generated rough
+terrain and swaps its collider: the trimesh prim is excluded from Newton's USD
+import (`ignore_paths` -> `UsdPhysics.LoadUsdPhysicsFromRange excludePaths`) and
+the captured mesh is rasterised with a Warp ray query into a
+`newton.Heightfield` (`AGILE_NEWTON_HEIGHTFIELD_RES`, default 0.1 m; the 100 m
+flat border is trimmed to `AGILE_NEWTON_HEIGHTFIELD_MARGIN` = 12 m ->
+961 x 881 samples). Contacts against it look like flat ground again:
+normal.z median +1.000, 0.4% horizontal normals (trimesh: 95% of the pulling
+normals were horizontal), friction share of the spurious downward force 3.6%
+(trimesh 84%), contacts with negative Fz 2.3% (trimesh 14%), and the physics
+surface sits on the mesh: contact z - mesh height median -0.4 mm, p90 5 mm.
+
+**Isaac Lab `develop` has this natively** (`SubTerrainBaseCfg.convert_to_heightfield`,
+rasterised by `NewtonManager._inject_terrain_heightfields` via
+`Heightfield.create_from_mesh`); with the knob on, the env cfg sets that flag on
+every sub-terrain and the wrapper steps aside. Getting it to run surfaced four
+defects, none of them AGILE's:
+
+1. **Constraint/contact buffer overflow.** `MJWarpSolverCfg` defaults to
+   `njmax=300` per world. A limp G1 pile needs 305-422 (our own beta2 training
+   logs carry `nefc overflow - please increase njmax to 3xx` lines: the solver
+   silently drops constraint rows for that world). On develop / mjwarp 3.11 the
+   overflow becomes a CUDA illegal address during fallen-state collection, or NaN
+   states that then poison the fallen-state cache. `AGILE_NEWTON_NJMAX` (default
+   512) / `AGILE_NEWTON_NCONMAX` (develop: 96) give headroom; the DC-envelope hook
+   prints the solver's real `njmax`/`naconmax` at init. (Gotcha: `@configclass`
+   stores defaults in `__dataclass_fields__`, so a `hasattr()` filter on the cfg
+   class silently dropped both keys the first time.)
+2. **Corrupted fallen states survive sanitising.** Clamping keeps NaN; one such
+   state poisons every episode that resets from it (PPO dies with a NaN policy
+   std at the first update). The dataset now rejects non-finite / out-of-cell /
+   non-unit-quaternion states at finalize and on cache load, flags non-finite
+   worlds as unstable during collection (NaN compares False against every
+   threshold, so they were never respawned) and clears the solver warm start of a
+   respawned world.
+3. **Newton 1.5.x drops the heightfield's `min_z`** when `_update_geom_properties`
+   (every `SHAPE_PROPERTIES` notification, including init) rewrites the per-world
+   `geom_pos` from the shape transform: MuJoCo model at z = -0.14, Warp model at
+   z = 0, every terrain contact 0.1398 m above the mesh (p90 0.1412), every reset
+   14 cm inside the ground. The wrapper re-applies the MuJoCo model's heightfield
+   geom position after that sync: median -0.1 mm, p90 2 mm afterwards.
+4. **Spurious deep heightfield contacts grow with the distance from the
+   heightfield origin** -- MuJoCo-Warp 3.8 and 3.11 alike, single heightfield:
+   deepest contact -0.1 m in the centre column, -1.5 .. -3.4 m in the outer
+   columns (32 m out), 2.6% of terrain contacts deeper than 5 cm on our stack;
+   the limp-fall blow-ups land in exactly those cells (terrain columns 0/1/7/8 x
+   rows 0/7). Shrinking the border does not move it (same cell positions).
+   `AGILE_NEWTON_HEIGHTFIELD_TILE=8` splits the raster into 8 m heightfield
+   shapes with a one-sample overlap (identical surface at the seams): worst depth
+   -0.26 m, no radial trend, 0.3% deeper than 5 cm. This is the "known
+   deep-contact bug" the earlier notes attributed to mjwarp 3.8 alone.
+
+**Rough terrain on the training stack** (beta2 / Newton 1.2, `AGILE_NEWTON_HEIGHTFIELD=1
+AGILE_NEWTON_HEIGHTFIELD_TILE=8 AGILE_NO_ASSIST=1`, 4096 envs): fallen-state
+collection 65,536 states with nothing rejected, 30/30 iterations, 0 NaN, 0
+quarantine, 0 overflow, 19.2k env-steps/s while sharing the GPU. Rough-terrain
+training is unblocked; it has not been run long yet.
+
+Flat ground on develop trains with 1+2 (20/20 iterations, 0 NaN, 0 overflow,
+~9.5k steps/s at 1024 envs on the shared GPU). Rough terrain on develop needed
+one more finding, and it is AGILE's: `reset_from_fallen_dataset` guards its
+joint-state write with `isinstance(asset, isaaclab.assets.Articulation)`, and
+on develop the backend class (`isaaclab_newton.assets.Articulation`) derives
+from `BaseArticulation`, not from that -- so every reset wrote root pose and
+velocity only and kept the previous joint state (traced write-by-write with
+`bench/scripts/hfield_reset_nan_probe.py`: only the two root writes ran inside
+the event). That is also why a world that went non-finite during collection
+stayed NaN through every reset -- upstream's warm-start clear (newton#1266)
+zeroes the solver buffers, but nothing ever overwrote the NaN joints. With the
+guard accepting `BaseArticulation`: rough heightfield terrain on develop trains
+20/20 iterations, 0 NaN, 0 quarantine, 0 overflow (6.5k steps/s at 1024 envs,
+shared GPU). The develop flat-ground numbers above were measured with joints not
+reset at all, so treat them as a solver smoke, not a task result.
