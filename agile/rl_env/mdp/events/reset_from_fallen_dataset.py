@@ -23,6 +23,13 @@ import torch
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
+
+try:  # Isaac Lab develop: backend articulations derive from BaseArticulation, not Articulation
+    from isaaclab.assets.articulation.base_articulation import BaseArticulation
+
+    _ARTICULATION_TYPES: tuple[type, ...] = (Articulation, BaseArticulation)
+except ImportError:  # 3.0.0b2 and earlier
+    _ARTICULATION_TYPES = (Articulation,)
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.terrains import TerrainImporter
 
@@ -183,7 +190,7 @@ class reset_from_fallen_dataset(ManagerTermBase):
         asset.write_root_velocity_to_sim(root_states[:, 7:13], env_ids)
 
         # Reset joints to default
-        if isinstance(asset, Articulation):
+        if isinstance(asset, _ARTICULATION_TYPES):
             asset.write_joint_state_to_sim(
                 asset.data.default_joint_pos.torch[env_ids],
                 asset.data.default_joint_vel.torch[env_ids],
@@ -255,7 +262,7 @@ class reset_from_fallen_dataset(ManagerTermBase):
         joint_pos = states["joint_pos"]
         joint_vel = torch.zeros_like(states["joint_vel"])
         root_vel = torch.zeros_like(root_vel)
-        if isinstance(asset, Articulation):
+        if isinstance(asset, _ARTICULATION_TYPES):
             limits = asset.data.joint_pos_limits
             limits = (limits.torch if hasattr(limits, "torch") else limits)[env_ids]
             joint_pos = torch.minimum(torch.maximum(joint_pos, limits[..., 0]), limits[..., 1])
@@ -265,7 +272,7 @@ class reset_from_fallen_dataset(ManagerTermBase):
         asset.write_root_velocity_to_sim(root_vel, env_ids)
 
         # Write joint state
-        if isinstance(asset, Articulation):
+        if isinstance(asset, _ARTICULATION_TYPES):
             asset.write_joint_state_to_sim(
                 joint_pos,
                 joint_vel,
