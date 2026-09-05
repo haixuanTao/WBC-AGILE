@@ -57,12 +57,27 @@ def _push_zero_efforts(robot) -> None:
     solver through ``data._sim_bind_joint_effort``, which is what the asset's own
     write path assigns to.
     """
-    _as_torch(robot._joint_effort_target_sim)[:] = 0.0
+    target = getattr(robot, "_joint_effort_target_sim", None)
+    if target is not None:
+        _as_torch(target)[:] = 0.0
     view = getattr(robot, "root_physx_view", None)
     if view is not None and hasattr(view, "set_dof_actuation_forces"):
-        view.set_dof_actuation_forces(robot._joint_effort_target_sim, robot._ALL_INDICES)
+        view.set_dof_actuation_forces(target, robot._ALL_INDICES)
+    elif target is not None:
+        robot.data._sim_bind_joint_effort.assign(target)
     else:
-        robot.data._sim_bind_joint_effort.assign(robot._joint_effort_target_sim)
+        # Isaac Lab develop: no per-asset staging buffer any more; the solver-bound
+        # ``control.joint_f`` view is the only effort buffer, so zero it in place.
+        _as_torch(robot.data._sim_bind_joint_effort)[:] = 0.0
+
+
+def _clear_solver_warmstart(env_ids) -> None:
+    """Best-effort: zero MuJoCo-Warp warm start of re-spawned worlds (Newton backend only)."""
+    try:
+        from agile.isaaclab_extras.newton_reset_warmstart import clear_solver_warmstart
+    except Exception:  # pragma: no cover - extras not importable
+        return
+    clear_solver_warmstart(env_ids)
 
 
 def _as_torch(x):
@@ -319,6 +334,10 @@ class FallenStateDataset:
                             for env_id in reset_ids:
                                 self._reset_single_env(env, env_id.item(), level)
                             level_reset_count += unstable.sum().item()
+                            # [newton] a blown-up world keeps its NaN solver memory through
+                            # the state write above; clear it or every later spawn in that
+                            # world is corrupted too (and gets dropped at finalize).
+                            _clear_solver_warmstart(reset_ids)
 
                     # Keep stepping until the robots have actually come to rest
                     # (max joint speed and root speed below threshold), bounded.
@@ -582,8 +601,12 @@ class FallenStateDataset:
         joint_vel_too_high = joint_vel_mag > self.cfg.max_joint_vel
 
         # Combine all checks
-        unstable = too_high | lin_vel_too_high | ang_vel_too_high | joint_vel_too_high
-
+        # NaN compares False everywhere, so a blown-up world would never be flagged by
+        # the thresholds above; treat any non-finite state as unstable explicitly.
+        non_finite = ~(torch.isfinite(root_pos_w).all(dim=-1) & torch.isfinite(root_lin_vel).all(dim=-1)
+                       & torch.isfinite(root_ang_vel).all(dim=-1) & torch.isfinite(joint_vel).all(dim=-1)
+                       & torch.isfinite(robot.data.joint_pos.torch).all(dim=-1))
+        unstable = too_high | lin_vel_too_high | ang_vel_too_high | joint_vel_too_high | non_finite
         return unstable
 
     def _capture_states(self, env: ManagerBasedRLEnv, level: int, terrain: TerrainImporter) -> None:
@@ -637,6 +660,50 @@ class FallenStateDataset:
         for key in storage:
             # Concatenate all collected tensors
             storage[key] = torch.cat(storage[key], dim=0)
+        self._drop_invalid_states(level)
+
+    def _drop_invalid_states(self, level: int, verbose: bool = True) -> int:
+        """Remove states the solver corrupted during collection.
+
+        [newton] A constraint/contact buffer overflow in MuJoCo-Warp (``nefc overflow -
+        please increase njmax``) leaves NaN joint positions and roots hundreds of km
+        away in the resting state of the affected envs. Clamping alone keeps NaN, and
+        one such state poisons every episode that resets from it, so reject them here
+        (and again on cache load, since a cache written before this check may carry them).
+
+        Returns:
+            Number of states dropped.
+        """
+        storage = self._states_by_level[level]
+        n = int(storage["root_pos_rel"].shape[0])
+        if n == 0:
+            return 0
+        finite = torch.ones(n, dtype=torch.bool)
+        for key, val in storage.items():
+            if torch.is_floating_point(val):
+                finite &= torch.isfinite(val.reshape(n, -1)).all(dim=1)
+        pos = storage["root_pos_rel"]
+        half_x = self._terrain_cell_size[0] / 2.0 + 1.0
+        half_y = self._terrain_cell_size[1] / 2.0 + 1.0
+        in_cell = (pos[:, 0].abs() <= half_x) & (pos[:, 1].abs() <= half_y)
+        z_ok = (pos[:, 2] > -2.0) & (pos[:, 2] < 5.0)
+        unit_quat = (storage["root_quat"].norm(dim=1) - 1.0).abs() < 1e-2
+        ok = finite & in_cell & z_ok & unit_quat
+        dropped = int((~ok).sum())
+        breakdown = (f"non-finite {int((~finite).sum())}, outside cell {int((finite & ~in_cell).sum())}, "
+                     f"z out of range {int((finite & ~z_ok).sum())}, bad quat {int((finite & ~unit_quat).sum())}")
+        if "terrain_type" in storage and not ok.all():
+            types, counts = torch.unique(storage["terrain_type"][~ok], return_counts=True)
+            breakdown += "; by terrain column " + ", ".join(f"{int(t)}:{int(c)}" for t, c in zip(types, counts))
+        if dropped:
+            if dropped == n:
+                raise RuntimeError(f"[FallenStateDataset] every state of level {level} is non-finite/out of bounds; "
+                                   "the physics blew up during collection (check for solver overflow warnings)")
+            for key in storage:
+                storage[key] = storage[key][ok]
+            if verbose:
+                print(f"[FallenStateDataset] level {level}: dropped {dropped}/{n} corrupted states ({breakdown})", flush=True)
+        return dropped
 
     def sample(self, num_samples: int, terrain_levels: torch.Tensor, device: str = "cuda") -> dict[str, torch.Tensor]:
         """Sample fallen states for given terrain levels.
@@ -736,6 +803,8 @@ class FallenStateDataset:
             self._terrain_cell_size = save_dict.get("terrain_cell_size", (8.0, 8.0))
             self._is_flat_terrain = save_dict.get("is_flat_terrain", False)
             self._states_by_level = save_dict["states_by_level"]
+            for _lvl in list(self._states_by_level):
+                self._drop_invalid_states(_lvl)
             # ---- [newton] joint-order remap -------------------------------------------
             # joint_pos / joint_vel are stored by INDEX in the order of the backend that
             # collected them. PhysX and Newton enumerate joints differently, so a cache
