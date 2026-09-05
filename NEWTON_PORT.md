@@ -367,7 +367,16 @@ defects, none of them AGILE's:
    `AGILE_NEWTON_HEIGHTFIELD_TILE=8` splits the raster into 8 m heightfield
    shapes with a one-sample overlap (identical surface at the seams): worst depth
    -0.26 m, no radial trend, 0.3% deeper than 5 cm. This is the "known
-   deep-contact bug" the earlier notes attributed to mjwarp 3.8 alone.
+   deep-contact bug" the earlier notes attributed to mjwarp 3.8 alone. 4 m tiles
+   do not improve on 8 m (worst -0.30 m, same 0.3%): what is left is no longer
+   distance-dependent. The wrapper is also the default on develop
+   (`AGILE_NEWTON_HEIGHTFIELD_NATIVE=1` opts into Isaac Lab's own conversion):
+   it hooks every per-prim `add_usd` there, and with 8 m tiles measures p90
+   alignment 2.4 mm, worst depth -0.215 m and 0.0% of terrain contacts deeper
+   than 5 cm (native single heightfield: 0.2%, at -1.5..-2.8 m).
+   Develop rough-terrain smoke with the tiled wrapper: 16,384 / 16,384 fallen
+   states kept (untiled: ~2% corrupted, all in the outer columns), 20/20
+   iterations, 0 NaN / quarantine / overflow.
 
 **Rough terrain on the training stack** (beta2 / Newton 1.2, `AGILE_NEWTON_HEIGHTFIELD=1
 AGILE_NEWTON_HEIGHTFIELD_TILE=8 AGILE_NO_ASSIST=1`, 4096 envs): fallen-state
@@ -392,6 +401,10 @@ clamp on 0.001% of joint samples. Two task findings on the way:
   last 1000 iterations. That is a task/reward dynamic to tune (the penalties are
   new to a policy trained on flat ground), not a physics event; 2500 iterations
   is far from converged.
+  Recorded on terrain row 6 (`record_newton_direct.py --terrain_level 6`): the
+  policy crouches into a deep kneel on a cell seam and stays there, i.e. it has
+  not learned the get-up on the hard rows yet. A 10,000-iteration continuation
+  from `model_31999` is running.
 
 Flat ground on develop trains with 1+2 (20/20 iterations, 0 NaN, 0 overflow,
 ~9.5k steps/s at 1024 envs on the shared GPU). Rough terrain on develop needed
