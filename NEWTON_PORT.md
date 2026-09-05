@@ -372,8 +372,26 @@ defects, none of them AGILE's:
 **Rough terrain on the training stack** (beta2 / Newton 1.2, `AGILE_NEWTON_HEIGHTFIELD=1
 AGILE_NEWTON_HEIGHTFIELD_TILE=8 AGILE_NO_ASSIST=1`, 4096 envs): fallen-state
 collection 65,536 states with nothing rejected, 30/30 iterations, 0 NaN, 0
-quarantine, 0 overflow, 19.2k env-steps/s while sharing the GPU. Rough-terrain
-training is unblocked; it has not been run long yet.
+quarantine, 0 overflow, 19.2k env-steps/s while sharing the GPU.
+
+First rough-terrain fine-tune (from the flat assist-free `model_26999`, 5000
+iterations, 4096 envs, `bench/scripts/run_newton_rough_finetune.sh`): 0 NaN, 0
+quarantine, 0 overflow over the whole run, every episode to time-out, velocity
+clamp on 0.001% of joint samples. Two task findings on the way:
+
+- The terrain curriculum (`terrain_levels_tracking_at_timeout`) has
+  `prerequisite_curriculum="adaptive_lift"` and returns 0 while that curriculum
+  state does not exist -- so with `AGILE_NO_ASSIST=1` it never activated (2500
+  iterations at level 0.0 with tracking error under the 0.1 m threshold), and
+  every reward-weight / event-param curriculum gates on terrain level >= 3-4 in
+  turn. The cfg now drops the prerequisite when the harness is off.
+- With it active, the mean terrain level went 0 -> 6.1 (of 7) in 900 iterations
+  while the tracking error fell to 0.05 m; when the level >= 4 reward curricula
+  switched on (slam / impact penalties) the reward scale dropped -66 -> -270, the
+  tracking error rose to 0.16 m and the curriculum settled at level ~4.0 for the
+  last 1000 iterations. That is a task/reward dynamic to tune (the penalties are
+  new to a policy trained on flat ground), not a physics event; 2500 iterations
+  is far from converged.
 
 Flat ground on develop trains with 1+2 (20/20 iterations, 0 NaN, 0 overflow,
 ~9.5k steps/s at 1024 envs on the shared GPU). Rough terrain on develop needed
