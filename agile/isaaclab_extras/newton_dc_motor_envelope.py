@@ -163,6 +163,10 @@ def apply_newton_dc_motor_envelope_patch() -> bool:
         eff_wp = wp.array(eff, dtype=wp.float32, device=device)
         vel_wp = wp.array(vel, dtype=wp.float32, device=device)
         nworld, njnt = mjw.jnt_actfrcrange.shape
+        mjd = getattr(solver, "mjw_data", None)
+        if mjd is not None:  # ground truth for the solver's constraint/contact capacity (overflow => dropped constraints)
+            print(f"[newton] solver capacity: nworld={nworld} njmax={int(mjd.njmax)} naconmax={int(mjd.naconmax)}"
+                  f" (~{int(mjd.naconmax) // max(nworld, 1)} contacts/world)", flush=True)
         if not hasattr(mjw, "jnt_dofadr") or not hasattr(mjw, "dof_damping"):
             print("[newton] DC envelope: solver has no jnt_dofadr / dof_damping; not applied")
             return

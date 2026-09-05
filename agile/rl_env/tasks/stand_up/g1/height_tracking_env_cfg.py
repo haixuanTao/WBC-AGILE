@@ -786,7 +786,22 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
                 use_cuda_graph=os.environ.get("AGILE_NEWTON_CUDA_GRAPH", "1") != "0",
                 # MJWarp integrator: "euler" (Newton default) or "implicitfast"
                 # (MuJoCo's recommendation for stiff PD-driven articulations).
-                solver_cfg=MJWarpSolverCfg(integrator=os.environ.get("AGILE_NEWTON_INTEGRATOR", "euler")),
+                solver_cfg=MJWarpSolverCfg(
+                    integrator=os.environ.get("AGILE_NEWTON_INTEGRATOR", "euler"),
+                    # Per-world constraint / contact capacity. A limp G1 piled on rough
+                    # terrain needs ~320 constraints and ~50 contacts; Isaac Lab develop
+                    # defaults to njmax=300 and an overflow there corrupts the solve
+                    # (CUDA illegal address / NaN policy), so give it headroom.
+                    **{
+                        k: v
+                        for k, v in {
+                            "njmax": int(os.environ.get("AGILE_NEWTON_NJMAX", "512")),
+                            "nconmax": int(os.environ["AGILE_NEWTON_NCONMAX"]) if os.environ.get("AGILE_NEWTON_NCONMAX") else None,
+                        }.items()
+                        # configclass keeps defaults in dataclass fields, not class attributes
+                        if k in getattr(MJWarpSolverCfg, "__dataclass_fields__", {}) and v is not None
+                    },
+                ),
                 default_shape_cfg=NewtonShapeCfg(
                     margin=float(os.environ.get("AGILE_NEWTON_MARGIN", "0.0")),
                     gap=float(os.environ.get("AGILE_NEWTON_GAP", "0.01")),
