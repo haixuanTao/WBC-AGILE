@@ -780,6 +780,12 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
         if os.environ.get("AGILE_NO_ASSIST", "0") == "1":
             self.actions.lift = None
             self.curriculum.adaptive_lift = None
+            # The terrain curriculum waits for adaptive_lift to decay below 0.01 before it
+            # promotes; with the harness gone that prerequisite never exists, so drop it
+            # (measured: 2500 rough-terrain iterations at level 0 with tracking error < 0.1).
+            if getattr(self.curriculum, "terrain_levels", None) is not None:
+                self.curriculum.terrain_levels.params["prerequisite_curriculum"] = None
+
 
         # [newton] diagnostic: AGILE_NEWTON_SELF_COLLISION=0 disables robot self-collision
         if os.environ.get("AGILE_NEWTON_SELF_COLLISION", "1") == "0":
