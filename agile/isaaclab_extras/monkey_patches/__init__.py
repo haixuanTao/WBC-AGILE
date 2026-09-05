@@ -16,6 +16,7 @@
 from . import (
     nan_watchdog,  # noqa: F401
     newton_dc_motor_envelope,  # noqa: F401
+    newton_heightfield_terrain,  # noqa: F401
     newton_joint_limit_solref,  # noqa: F401
     newton_reset_warmstart,  # noqa: F401
     newton_nan_quarantine,  # noqa: F401
