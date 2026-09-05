@@ -201,8 +201,8 @@ def apply_newton_heightfield_terrain_patch() -> bool:
             # heightfield origin (measured: -0.1 m at the centre column, -1.5..-2.8 m at
             # +-32 m), so keeping every point within a few metres of its shape origin
             # sidesteps it. Tiles overlap by one sample row/column, so the surface is
-            # identical at the seams. 0 (default) = one heightfield.
-            tile_m = float(os.environ.get("AGILE_NEWTON_HEIGHTFIELD_TILE", "0"))
+            # identical at the seams. Default 8 m (measured best); 0 = one heightfield.
+            tile_m = float(os.environ.get("AGILE_NEWTON_HEIGHTFIELD_TILE", "8"))
             tile_n = int(round(tile_m / res)) if tile_m > 0 else 0
             sids = []
             r_edges = list(range(0, nrow - 1, tile_n)) + [nrow - 1] if tile_n else [0, nrow - 1]
