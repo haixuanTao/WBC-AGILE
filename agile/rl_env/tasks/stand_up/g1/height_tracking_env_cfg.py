@@ -768,10 +768,10 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
             for sub_cfg in self.scene.terrain.terrain_generator.sub_terrains.values():
                 if hasattr(sub_cfg, "convert_to_heightfield"):
                     sub_cfg.convert_to_heightfield = True
-            # The 100 m flat border makes the native heightfield 264 m wide (2641x2721 cells);
-            # measured on develop: spurious deep terrain contacts grow with distance from the
-            # heightfield centre (-0.1 m at the middle column, -1.8 m at the outer ones), and the
-            # limp-fall blow-ups sit in exactly those outer cells. A robot never gets 20 m out.
+            # Both paths: the 100 m flat border makes a single heightfield 264 m wide
+            # (2641x2721 cells) for nothing -- a robot never gets 20 m out. (It does not by
+            # itself change MuJoCo-Warp's radial deep-contact artefact; tiling does, see
+            # AGILE_NEWTON_HEIGHTFIELD_TILE in agile/isaaclab_extras/newton_heightfield_terrain.py.)
             self.scene.terrain.terrain_generator.border_width = float(
                 os.environ.get("AGILE_NEWTON_HEIGHTFIELD_BORDER", "20.0")
             )
