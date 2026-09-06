@@ -635,7 +635,15 @@ class adaptive_force_decay(ManagerTermBase):
         else:
             metric = float(self._command_term.metrics[metric_name][env_ids].mean().item())
 
-        # EMA update
+        # EMA update.
+        # [newton] A transient non-finite env (Newton occasionally produces one, which the
+        # NaN quarantine resets a step later) makes ``metric`` -- a mean over all envs --
+        # NaN for one step. Folded into the EMA that NaN is permanent, and ``NaN < threshold``
+        # is always False, so the assist force freezes and the whole curriculum (terrain
+        # levels gate on this reaching 0) stalls. Measured: adaptive_lift stuck at 0.989 on
+        # Newton while PhysX decays to 0. Skip the update when the metric is not finite.
+        if not math.isfinite(metric):
+            return self._force_scale
         self._ema = ema_alpha * metric + (1 - ema_alpha) * self._ema
 
         # Decay when metric crosses threshold
