@@ -421,3 +421,32 @@ guard accepting `BaseArticulation`: rough heightfield terrain on develop trains
 20/20 iterations, 0 NaN, 0 quarantine, 0 overflow (6.5k steps/s at 1024 envs,
 shared GPU). The develop flat-ground numbers above were measured with joints not
 reset at all, so treat them as a solver smoke, not a task result.
+
+## Rough-terrain training was blocked by a NaN-poisoned curriculum (fixed)
+
+Symptom: with AGILE's stock recipe (lift harness on) the Newton run sat at terrain
+level 0 forever, while the same recipe on PhysX progressed. The gate is
+`adaptive_force_decay` (the `adaptive_lift` curriculum): it decays the lift harness while
+a smoothed height-error EMA is below threshold, and `terrain_levels` only promotes once
+that harness reaches ~0. On Newton the harness froze at 0.989 by iteration ~2700; on
+PhysX it decayed past 0.34.
+
+Ruled out by measurement, not assumption:
+- The RayCaster height sensor reads correctly on the heightfield (100% finite hits,
+  ground within 0.07 m of the cell origin, `base_height` ~0.78 m for a standing robot).
+- The pelvis/torso contacts that drive the -250 `torso_slam` penalty are physical, not a
+  heightfield-seam artifact (1045 real vs 2 spurious over 250 steps on level 6). So the
+  robot really does use its pelvis to get up on hard terrain, and harness-free training
+  (`AGILE_NO_ASSIST`) hits that penalty barrier -- which is why the stock harness recipe,
+  not the assist-free fine-tune, is the right comparison.
+
+Cause: `adaptive_force_decay` folds a mean-over-envs metric into an EMA. Newton
+occasionally produces a single non-finite env (the NaN quarantine resets it a step later),
+which makes the mean NaN for one step; folded into the EMA that NaN is permanent and
+`NaN < threshold` is always False, so the harness -- and the entire terrain curriculum
+gated on it -- freezes. Fix: skip the EMA update when the metric is non-finite
+(`task_curriculum.py`). Verified: the harness now decays on Newton (1.0 -> 0.75 by
+iteration 407 and falling) even though 13 NaN metric steps occurred in that window, where
+before the first NaN froze it. Diagnostics: `bench/scripts/height_sensor_probe.py`,
+`bench/scripts/torso_contact_probe.py`.
+
