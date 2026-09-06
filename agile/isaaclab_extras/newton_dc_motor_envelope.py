@@ -53,6 +53,53 @@ _SATURATION_GROUPS: tuple[tuple[float, tuple[str, ...]], ...] = (
 
 
 @wp.kernel(enable_backward=False)
+def _dc_envelope_faithful_kernel(
+    mjc_jnt_to_newton_dof: wp.array2d(dtype=wp.int32),
+    joint_qd: wp.array(dtype=wp.float32),
+    sat: wp.array(dtype=wp.float32),
+    eff: wp.array(dtype=wp.float32),
+    vel: wp.array(dtype=wp.float32),
+    # output
+    jnt_actfrcrange: wp.array2d(dtype=wp.vec2),
+):
+    """Exact port of isaaclab.actuators.DCMotor._clip_effort into the MuJoCo solver.
+
+    PhysX runs the DC motor explicitly: it computes the PD torque, then clips it to a
+    speed-dependent, ASYMMETRIC window before applying it. That window is (signed qd):
+
+        vlim   = velocity_limit * (1 + effort_limit / saturation_effort)
+        qd     = clip(qd, -vlim, vlim)
+        top    = saturation_effort * (1 - qd / velocity_limit)
+        bottom = saturation_effort * (-1 - qd / velocity_limit)
+        max    = min(top,  effort_limit)     # NOT floored at 0: above no-load
+        min    = max(bottom, -effort_limit)  # speed the motor can only brake
+
+    MuJoCo's ``jnt_actfrcrange`` is exactly a ``[min, max]`` bound on the joint's total
+    actuator force, enforced in ``fwd_actuation`` on the *implicitly* computed PD torque.
+    Writing this window each step reproduces the PhysX envelope bit-for-bit -- including
+    the braking (generator) region -- with none of the explicit-Euler instability, so no
+    damping approximation is needed.
+    """
+    world, jnt = wp.tid()
+    dof = mjc_jnt_to_newton_dof[world, jnt]
+    if dof < 0:
+        return
+    s = sat[dof]
+    if s <= 0.0:
+        return
+    e = eff[dof]
+    v = vel[dof]
+    if v <= 0.0 or e <= 0.0:
+        return
+    qd = joint_qd[dof]
+    vlim = v * (1.0 + e / s)
+    qd = wp.clamp(qd, -vlim, vlim)
+    top = s * (1.0 - qd / v)
+    bottom = s * (-1.0 - qd / v)
+    jnt_actfrcrange[world, jnt] = wp.vec2(wp.max(bottom, -e), wp.min(top, e))
+
+
+@wp.kernel(enable_backward=False)
 def _dc_envelope_kernel(
     mjc_jnt_to_newton_dof: wp.array2d(dtype=wp.int32),
     jnt_dofadr: wp.array(dtype=wp.int32),
@@ -175,20 +222,33 @@ def apply_newton_dc_motor_envelope_patch() -> bool:
         # multiples of the effort limit (0 disables the band; 50 = a hard limit in practice)
         vel_limit_gain = float(os.environ.get("AGILE_NEWTON_VEL_LIMIT_GAIN", "50"))
 
+        faithful = os.environ.get("AGILE_NEWTON_DC_ENVELOPE_MODE", "faithful") != "symmetric"
+
         def _apply_envelope():
-            wp.launch(
-                _dc_envelope_kernel,
-                dim=(nworld, njnt),
-                inputs=[jnt_map, mjw.jnt_dofadr, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp, base_damping, vel_limit_gain],
-                outputs=[mjw.jnt_actfrcrange, mjw.dof_damping],
-                device=device,
-            )
+            if faithful:
+                wp.launch(
+                    _dc_envelope_faithful_kernel,
+                    dim=(nworld, njnt),
+                    inputs=[jnt_map, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp],
+                    outputs=[mjw.jnt_actfrcrange],
+                    device=device,
+                )
+            else:
+                wp.launch(
+                    _dc_envelope_kernel,
+                    dim=(nworld, njnt),
+                    inputs=[jnt_map, mjw.jnt_dofadr, cls._state_0.joint_qd, sat_wp, eff_wp, vel_wp, base_damping, vel_limit_gain],
+                    outputs=[mjw.jnt_actfrcrange, mjw.dof_damping],
+                    device=device,
+                )
 
         cls.register_post_actuator_callback(_apply_envelope)
         print(
             f"[newton] DC-motor torque-speed envelope active on {matched}/{model.joint_dof_count} DOFs "
-            f"({nworld} worlds x {njnt} joints) via jnt_actfrcrange + generator braking via dof_damping"
-            + (f", velocity-limit band gain {vel_limit_gain:g}" if vel_limit_gain > 0 else "")
+            f"({nworld} worlds x {njnt} joints) via jnt_actfrcrange -- "
+            + ("FAITHFUL two-sided PhysX curve (min/max = clip of s*(-+1 - qd/v))"
+               if faithful else
+               f"symmetric drive cap + generator braking via dof_damping, band gain {vel_limit_gain:g}")
         )
 
     NewtonManager.initialize_solver = initialize_solver_with_envelope
